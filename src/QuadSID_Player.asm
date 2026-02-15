@@ -40,11 +40,24 @@ BasicUpstart2(start)
 .const VIC_BGCOLOR   = $D021    // Background color
 
 // CIA registers
+.const CIA1_PORTA    = $DC00    // CIA 1 Port A (keyboard column select)
+.const CIA1_PORTB    = $DC01    // CIA 1 Port B (keyboard row read)
 .const CIA1_ICR      = $DC0D    // CIA 1 interrupt control
 .const CIA2_ICR      = $DD0D    // CIA 2 interrupt control
 
 // Processor port
 .const PROC_PORT     = $01
+
+// C64 Keyboard matrix positions for keys 1-4:
+//   "1" = Column 0 (bit 0), Row 7 (bit 7)
+//   "2" = Column 3 (bit 3), Row 7 (bit 7)
+//   "3" = Column 0 (bit 0), Row 1 (bit 1)
+//   "4" = Column 3 (bit 3), Row 1 (bit 1)
+.const KEY_COL0      = $FE      // Select column 0 (keys 1, 3)
+.const KEY_COL3      = $F7      // Select column 3 (keys 2, 4)
+.const KEY_ROW7_MASK = %10000000   // Row 7 mask (keys 1, 2)
+.const KEY_ROW1_MASK = %00000010   // Row 1 mask (keys 3, 4)
+
 
 // IRQ vectors (Kernal banked out → use hardware vectors)
 .const IRQ_LO        = $FFFE
@@ -52,6 +65,10 @@ BasicUpstart2(start)
 
 // Screen RAM (default location)
 .const SCREEN        = $0400
+
+// Status display position (row 20)
+.const STATUS_ROW    = SCREEN + 40*20
+.const COLOR_ROW     = $D800 + 40*20
 
 // C64 color codes
 .const BLACK  = 0
@@ -150,10 +167,125 @@ start:
 
             // -- Print title to screen --
             jsr print_title
+            jsr update_status           // Draw initial toggle status
 
-            // -- Enable interrupts and loop forever --
+            // -- Enable interrupts and enter main loop --
             cli
-            jmp *                       // Infinite loop (IRQs do all the work)
+
+            // ========================================
+            //  MAIN LOOP: Keyboard polling for toggles
+            //  Keys 1-4 toggle SID channels on/off
+            // ========================================
+main_loop:
+            // --- Scan column 0 (keys "1" and "3") ---
+            lda #KEY_COL0
+            sta CIA1_PORTA
+            lda CIA1_PORTB
+
+            // Check key "1" (row 7)
+            tax                         // Save port B state
+            and #KEY_ROW7_MASK
+            bne !key1_up+               // Bit set = NOT pressed
+            // Key 1 pressed - check debounce
+            lda key1_prev
+            bne !skip1+                 // Already held down, skip
+            lda #$01
+            sta key1_prev               // Mark as held
+            lda tune1_active
+            eor #$01                    // Toggle
+            sta tune1_active
+            beq !mute1+
+            // Re-init tune 1 when enabling
+            lda #$00
+            jsr TUNE1_INIT
+            jmp !skip1+
+!mute1:     jsr silence_sid1
+            jmp !skip1+
+!key1_up:   lda #$00
+            sta key1_prev               // Key released
+!skip1:
+
+            // Check key "3" (row 1)
+            txa                         // Restore port B state
+            and #KEY_ROW1_MASK
+            bne !key3_up+
+            lda key3_prev
+            bne !skip3+
+            lda #$01
+            sta key3_prev
+            lda tune3_active
+            eor #$01
+            sta tune3_active
+            beq !mute3+
+            lda #$00
+            jsr TUNE3_INIT
+            jmp !skip3+
+!mute3:     jsr silence_sid3
+            jmp !skip3+
+!key3_up:   lda #$00
+            sta key3_prev
+!skip3:
+
+            // --- Scan column 3 (keys "2" and "4") ---
+            lda #KEY_COL3
+            sta CIA1_PORTA
+            lda CIA1_PORTB
+
+            // Check key "2" (row 7)
+            tax
+            and #KEY_ROW7_MASK
+            bne !key2_up+
+            lda key2_prev
+            bne !skip2+
+            lda #$01
+            sta key2_prev
+            lda tune2_active
+            eor #$01
+            sta tune2_active
+            beq !mute2+
+            lda #$00
+            jsr TUNE2_INIT
+            jmp !skip2+
+!mute2:     jsr silence_sid2
+            jmp !skip2+
+!key2_up:   lda #$00
+            sta key2_prev
+!skip2:
+
+            // Check key "4" (row 1)
+            txa
+            and #KEY_ROW1_MASK
+            bne !key4_up+
+            lda key4_prev
+            bne !skip4+
+            lda #$01
+            sta key4_prev
+            lda tune4_active
+            eor #$01
+            sta tune4_active
+            beq !mute4+
+            lda #$00
+            jsr TUNE4_INIT
+            jmp !skip4+
+!mute4:     jsr silence_sid4
+            jmp !skip4+
+!key4_up:   lda #$00
+            sta key4_prev
+!skip4:
+
+            // Restore CIA1 port A (so joystick still works)
+            lda #$FF
+            sta CIA1_PORTA
+
+            // Update on-screen status display
+            jsr update_status
+
+            // Small delay to reduce CPU spinning
+            ldx #$00
+!delay:     dex
+            bne !delay-
+
+            jmp main_loop
 
 
 // ============================================================
@@ -175,10 +307,13 @@ irq1:
             lda #$FF                    // Acknowledge VIC-II IRQ
             sta VIC_IRQ_FLAG
 
-            inc VIC_BORDER              // Debug: show timing (optional)
+            lda tune1_active            // Check if tune 1 is enabled
+            beq !skip_play1+
+            inc VIC_BORDER              // Debug: show timing
             jsr TUNE1_PLAY              // Play tune 1
             lda #BLACK
             sta VIC_BORDER
+!skip_play1:
 
             // Chain to next IRQ
             lda #RASTER_IRQ2
@@ -209,10 +344,13 @@ irq2:
             lda #$FF
             sta VIC_IRQ_FLAG
 
+            lda tune2_active
+            beq !skip_play2+
             inc VIC_BORDER
             jsr TUNE2_PLAY
             lda #BLACK
             sta VIC_BORDER
+!skip_play2:
 
             lda #RASTER_IRQ3
             sta VIC_RASTER
@@ -242,10 +380,13 @@ irq3:
             lda #$FF
             sta VIC_IRQ_FLAG
 
+            lda tune3_active
+            beq !skip_play3+
             inc VIC_BORDER
             jsr TUNE3_PLAY
             lda #BLACK
             sta VIC_BORDER
+!skip_play3:
 
             lda #RASTER_IRQ4
             sta VIC_RASTER
@@ -275,10 +416,13 @@ irq4:
             lda #$FF
             sta VIC_IRQ_FLAG
 
+            lda tune4_active
+            beq !skip_play4+
             inc VIC_BORDER
             jsr TUNE4_PLAY
             lda #BLACK
             sta VIC_BORDER
+!skip_play4:
 
             // Chain back to first IRQ (circular)
             lda #RASTER_IRQ1
@@ -294,6 +438,183 @@ irq4:
             tax
             pla
             rti
+
+
+// ============================================================
+//  SID SILENCE ROUTINES
+//  Clear all writable registers on the specified SID chip
+// ============================================================
+
+silence_sid1:
+            ldx #$18
+            lda #$00
+!s1:        sta SID1_BASE,x
+            dex
+            bpl !s1-
+            rts
+
+silence_sid2:
+            ldx #$18
+            lda #$00
+!s2:        sta SID2_BASE,x
+            dex
+            bpl !s2-
+            rts
+
+silence_sid3:
+            ldx #$18
+            lda #$00
+!s3:        sta SID3_BASE,x
+            dex
+            bpl !s3-
+            rts
+
+silence_sid4:
+            ldx #$18
+            lda #$00
+!s4:        sta SID4_BASE,x
+            dex
+            bpl !s4-
+            rts
+
+
+// ============================================================
+//  TOGGLE STATE VARIABLES
+// ============================================================
+
+tune1_active:   .byte $01          // 1 = playing, 0 = muted
+tune2_active:   .byte $01
+tune3_active:   .byte $01
+tune4_active:   .byte $01
+
+key1_prev:      .byte $00          // Debounce: 1 = held, 0 = released
+key2_prev:      .byte $00
+key3_prev:      .byte $00
+key4_prev:      .byte $00
+
+
+// ============================================================
+//  STATUS DISPLAY
+//  Shows which SID channels are active on screen row 20
+// ============================================================
+
+update_status:
+            // Print status text: "1:xx  2:xx  3:xx  4:xx"
+            // Position: row 20, col 4
+
+            // --- SID 1 ---
+            lda #$31                        // "1"
+            sta STATUS_ROW + 4
+            lda #$3A                        // ":"
+            sta STATUS_ROW + 5
+            lda tune1_active
+            beq !off1+
+            lda #$0F                        // "O"
+            sta STATUS_ROW + 6
+            lda #$0E                        // "N"
+            sta STATUS_ROW + 7
+            lda #$20                        // " "
+            sta STATUS_ROW + 8
+            lda #LGREEN
+            jmp !col1+
+!off1:      lda #$0F                        // "O"
+            sta STATUS_ROW + 6
+            lda #$06                        // "F"
+            sta STATUS_ROW + 7
+            lda #$06                        // "F"
+            sta STATUS_ROW + 8
+            lda #RED
+!col1:      sta COLOR_ROW + 4
+            sta COLOR_ROW + 5
+            sta COLOR_ROW + 6
+            sta COLOR_ROW + 7
+            sta COLOR_ROW + 8
+
+            // --- SID 2 ---
+            lda #$32                        // "2"
+            sta STATUS_ROW + 12
+            lda #$3A                        // ":"
+            sta STATUS_ROW + 13
+            lda tune2_active
+            beq !off2+
+            lda #$0F
+            sta STATUS_ROW + 14
+            lda #$0E
+            sta STATUS_ROW + 15
+            lda #$20
+            sta STATUS_ROW + 16
+            lda #LGREEN
+            jmp !col2+
+!off2:      lda #$0F
+            sta STATUS_ROW + 14
+            lda #$06
+            sta STATUS_ROW + 15
+            lda #$06
+            sta STATUS_ROW + 16
+            lda #RED
+!col2:      sta COLOR_ROW + 12
+            sta COLOR_ROW + 13
+            sta COLOR_ROW + 14
+            sta COLOR_ROW + 15
+            sta COLOR_ROW + 16
+
+            // --- SID 3 ---
+            lda #$33                        // "3"
+            sta STATUS_ROW + 20
+            lda #$3A
+            sta STATUS_ROW + 21
+            lda tune3_active
+            beq !off3+
+            lda #$0F
+            sta STATUS_ROW + 22
+            lda #$0E
+            sta STATUS_ROW + 23
+            lda #$20
+            sta STATUS_ROW + 24
+            lda #LGREEN
+            jmp !col3+
+!off3:      lda #$0F
+            sta STATUS_ROW + 22
+            lda #$06
+            sta STATUS_ROW + 23
+            lda #$06
+            sta STATUS_ROW + 24
+            lda #RED
+!col3:      sta COLOR_ROW + 20
+            sta COLOR_ROW + 21
+            sta COLOR_ROW + 22
+            sta COLOR_ROW + 23
+            sta COLOR_ROW + 24
+
+            // --- SID 4 ---
+            lda #$34                        // "4"
+            sta STATUS_ROW + 28
+            lda #$3A
+            sta STATUS_ROW + 29
+            lda tune4_active
+            beq !off4+
+            lda #$0F
+            sta STATUS_ROW + 30
+            lda #$0E
+            sta STATUS_ROW + 31
+            lda #$20
+            sta STATUS_ROW + 32
+            lda #LGREEN
+            jmp !col4+
+!off4:      lda #$0F
+            sta STATUS_ROW + 30
+            lda #$06
+            sta STATUS_ROW + 31
+            lda #$06
+            sta STATUS_ROW + 32
+            lda #RED
+!col4:      sta COLOR_ROW + 28
+            sta COLOR_ROW + 29
+            sta COLOR_ROW + 30
+            sta COLOR_ROW + 31
+            sta COLOR_ROW + 32
+
+            rts
 
 
 // ============================================================
@@ -410,6 +731,21 @@ print_title:
             dex
             bpl !col4-
 
+            // Help line: row 22 - "KEYS 1-4: TOGGLE SID CHANNELS"
+            ldx #$00
+!th:        lda help_line,x
+            beq !doneh+
+            sta SCREEN + 40*22 + 5,x
+            inx
+            jmp !th-
+!doneh:
+            // Help text color: dark grey
+            ldx #39
+            lda #DGREY
+!col5:      sta $D800 + 40*22,x
+            dex
+            bpl !col5-
+
             rts
 
 // ============================================================
@@ -487,6 +823,17 @@ title_line9:
             .byte $13,$15,$10,$05,$12,$20           // SUPER_
             .byte $11,$15,$01,$14,$14,$12,$0F,$20   // QUATTRO_
             .byte $32,$30,$32,$36                   // 2026
+            .byte $00
+
+
+help_line:
+            //      "KEYS 1-4: TOGGLE SID CHANNELS"
+            .byte $0B,$05,$19,$13,$20       // KEYS_
+            .byte $31,$2D,$34,$3A,$20       // 1-4:_
+            .byte $14,$0F,$07,$07,$0C,$05   // TOGGLE
+            .byte $20                       // _
+            .byte $13,$09,$04,$20           // SID_
+            .byte $03,$08,$01,$0E,$0E,$05,$0C,$13   // CHANNELS
             .byte $00
 
 
