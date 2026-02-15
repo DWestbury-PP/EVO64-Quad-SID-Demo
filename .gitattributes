@@ -1,0 +1,10 @@
+# Ensure binary files are never mangled by git
+*.jpeg binary
+*.jpg binary
+*.png binary
+*.gif binary
+*.prg binary
+*.sid binary
+*.bin binary
+*.jar binary
+*.pdf binary
