@@ -4,7 +4,7 @@
 
 This project creates a simultaneous quad-SID music player for the [EVO64 Super Quattro](https://evo64.com) — a modern hardware reimagining of the Commodore 64 that supports up to four SID audio chips, delivering 12 voices of polyphonic chiptune goodness.
 
-![EVO64 Super Quattro](assets/EVO64-SuperQuattro-4SID.png)
+![EVO64 Super Quattro](assets/EVO64-SuperQuattro-4SID.jpeg)
 *The EVO64 Super Quattro board with four SID chip sockets, dual CIAs, onboard audio amps, and the custom QAPLA PLA — ready for 12-voice polyphonic playback.*
 
 ## Overview
