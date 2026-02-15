@@ -486,17 +486,22 @@ def relocate_and_patch(binary_data, base_addr, new_base, sid_offset,
                 )
 
     # Step 3: Precise data pointer relocation
-    # Instead of a blunt heuristic, we analyze code access patterns to find
-    # data tables that contain address pointers needing relocation.
+    # Uses code flow analysis (from the SID-WIZARD player architecture) to
+    # identify exactly which data tables need relocation patching.
     #
-    # Strategy:
-    #   (a) Find interleaved 16-bit pointer tables: scan data regions for
-    #       pairs of bytes that form valid little-endian addresses within
-    #       the binary's address range.  Require a run of consecutive valid
-    #       pointer pairs to confirm it's a table (not random data).
-    #   (b) Find split hi-byte tables: look at data tables accessed by
-    #       indexed addressing in code, check if the majority of their
-    #       values are high-byte pages within the binary's range.
+    # SID-WIZARD's native relocator (relodata in exporter.asm) patches:
+    #   1. Split hi-byte tables (PPTRHI, INSPTHI) - every byte is a hi-byte
+    #   2. Interleaved pointer tables (BIGFXTABLE, SUBTUNES) - every other
+    #      byte is a hi-byte of a 16-bit LE address pair
+    #
+    # Detection strategy:
+    #   Phase 1: Find ABX/ABY table accesses in code and trace destinations
+    #   Phase 2: Confirm split hi-byte tables (stored to odd ZP address)
+    #   Phase 3: Detect interleaved tables (adjacent base pairs, b and b+1)
+    #   Phase 4: Determine table sizes
+    #   Phase 5: Patch split hi-byte tables (all entries)
+    #   Phase 6: Patch interleaved tables (only hi-byte of each pair)
+    #   Phase 7: Fallback heuristic for any remaining tables
     #
     if reloc_delta != 0:
         orig_hi_start = (base_addr >> 8) & 0xFF
@@ -504,96 +509,8 @@ def relocate_and_patch(binary_data, base_addr, new_base, sid_offset,
         hi_delta = (reloc_delta >> 8) & 0xFF
         data_ptr_patches = 0
 
-        # --- (a) Find interleaved 16-bit LE pointer tables in data ---
-        # Scan data bytes (not in code) for runs of consecutive 16-bit
-        # little-endian values that all point within the binary.
-        # A "run" of 3+ consecutive valid pointers confirms a table.
-        #
-        # IMPORTANT: We must distinguish real pointer tables from
-        # frequency/parameter lookup tables. Frequency tables contain
-        # smoothly increasing byte values that can accidentally form
-        # "valid addresses" when read as pairs.  We reject runs where
-        # the constructed addresses form a monotonic sequence (pointers
-        # in real tables jump around; frequency tables increase smoothly).
-        MIN_PTR_RUN = 3  # Minimum consecutive valid pointers to confirm
-
-        i = 0
-        while i < len(binary_data) - 1:
-            if i in code_offsets or (i + 1) in code_offsets:
-                i += 1
-                continue
-
-            # Check if this pair forms a valid internal address
-            lo = binary_data[i]
-            hi = binary_data[i + 1]
-            addr16 = lo | (hi << 8)
-
-            if base_addr <= addr16 < data_end_addr:
-                # Potential pointer - count consecutive pointer pairs
-                run_offsets = []
-                run_addrs = []
-                j = i
-                while j < len(binary_data) - 1:
-                    if j in code_offsets or (j + 1) in code_offsets:
-                        break
-                    lo_j = binary_data[j]
-                    hi_j = binary_data[j + 1]
-                    addr_j = lo_j | (hi_j << 8)
-                    if base_addr <= addr_j < data_end_addr:
-                        run_offsets.append(j)
-                        run_addrs.append(addr_j)
-                        j += 2  # Move to next pair
-                    else:
-                        break
-
-                if len(run_offsets) >= MIN_PTR_RUN:
-                    # Check if this is a frequency/parameter table:
-                    # Reject if the addresses are monotonically increasing
-                    # (real pointer tables have irregular address ordering)
-                    is_monotonic = all(
-                        run_addrs[k] <= run_addrs[k + 1]
-                        for k in range(len(run_addrs) - 1)
-                    )
-                    is_monotonic_dec = all(
-                        run_addrs[k] >= run_addrs[k + 1]
-                        for k in range(len(run_addrs) - 1)
-                    )
-
-                    if is_monotonic or is_monotonic_dec:
-                        # Likely a frequency/parameter table - skip
-                        report.append(
-                            f"  SKIP     @ ${base_addr+run_offsets[0]:04X}: "
-                            f"monotonic sequence ({len(run_offsets)} pairs) "
-                            f"- likely frequency/parameter table, not pointers"
-                        )
-                        i = j
-                    else:
-                        # Confirmed pointer table - patch the hi-bytes
-                        for ptr_off in run_offsets:
-                            hi_off = ptr_off + 1
-                            old_hi = patched[hi_off]
-                            new_hi = (old_hi + hi_delta) & 0xFF
-                            if old_hi != new_hi:
-                                patched[hi_off] = new_hi
-                                data_ptr_patches += 1
-                                report.append(
-                                    f"  PTR-TBL  @ ${base_addr+ptr_off:04X}: "
-                                    f"${binary_data[ptr_off]:02X}{old_hi:02X} -> "
-                                    f"${binary_data[ptr_off]:02X}{new_hi:02X} "
-                                    f"(16-bit LE pointer table)"
-                                )
-                        i = j  # Skip past the table
-                else:
-                    i += 1
-            else:
-                i += 1
-
-        # --- (b) Find split hi-byte tables accessed by indexed code ---
-        # Scan code for indexed addressing (ABX/ABY) that reads from data
-        # regions.  For each such table, check if it's predominantly hi-bytes.
-        ABX_MODE = ABX
-        ABY_MODE = ABY
-        table_bases = set()
+        # --- Phase 1: Find all ABX/ABY table accesses and trace destinations ---
+        table_accesses = {}  # tbl_addr -> list of (code_offset, dest_zp)
 
         for offset in sorted(inst_starts):
             opcode = binary_data[offset]
@@ -601,50 +518,231 @@ def relocate_and_patch(binary_data, base_addr, new_base, sid_offset,
                 continue
             mnemonic, mode = OPCODES[opcode]
             size = MODE_SIZE[mode]
-            if mode not in (ABX_MODE, ABY_MODE) or size != 3:
+            if mode not in (ABX, ABY) or size != 3:
+                continue
+            if mnemonic not in ('LDA', 'LDX', 'LDY'):
                 continue
             if offset + 2 >= len(binary_data):
                 continue
             tbl_addr = binary_data[offset + 1] | (binary_data[offset + 2] << 8)
             tbl_off = tbl_addr - base_addr
-            if 0 <= tbl_off < len(binary_data) and tbl_off not in code_offsets:
-                table_bases.add(tbl_addr)
+            if not (0 <= tbl_off < len(binary_data) and tbl_off not in code_offsets):
+                continue
 
-        # For each table base, examine its contents
-        for tbl_addr in sorted(table_bases):
+            # Look forward through up to 3 instructions for a STA to ZP
+            dest_zp = None
+            scan = offset + size
+            for _step in range(3):
+                if scan not in inst_starts or scan >= len(binary_data):
+                    break
+                scan_op = binary_data[scan]
+                if scan_op not in OPCODES:
+                    break
+                scan_mnem, scan_mode = OPCODES[scan_op]
+                scan_size = MODE_SIZE[scan_mode]
+                if scan_mnem == 'STA' and scan_mode == ZP and scan + 1 < len(binary_data):
+                    dest_zp = binary_data[scan + 1]
+                    break
+                if scan_mnem in ('STA', 'STX', 'STY', 'JSR', 'JMP', 'RTS', 'RTI', 'BRK'):
+                    break
+                scan += scan_size
+
+            if tbl_addr not in table_accesses:
+                table_accesses[tbl_addr] = []
+            table_accesses[tbl_addr].append((offset, dest_zp))
+
+        # --- Phase 2: Identify confirmed split hi-byte tables ---
+        # A table whose values are stored to an ODD zero-page address is
+        # feeding the high byte of a pointer pair ($FE/$FF, $FC/$FD, etc.)
+        confirmed_hi_tables = set()
+        for tbl_addr, accesses in table_accesses.items():
+            for _code_off, dest_zp in accesses:
+                if dest_zp is not None and dest_zp % 2 == 1:
+                    confirmed_hi_tables.add(tbl_addr)
+                    break
+
+        # Identify lo-byte tables (stored to even ZP)
+        confirmed_lo_tables = set()
+        for tbl_addr, accesses in table_accesses.items():
+            for _code_off, dest_zp in accesses:
+                if dest_zp is not None and dest_zp % 2 == 0:
+                    confirmed_lo_tables.add(tbl_addr)
+                    break
+
+        # --- Phase 3: Detect interleaved pointer tables ---
+        # In SID-WIZARD, interleaved tables (like BIGFXTABLE, SUBTUNES)
+        # are accessed by two ABX/ABY instructions whose base addresses
+        # differ by exactly 1 byte:  LDA table,Y  and  LDA table+1,Y
+        # The lower base reads lo-bytes, the higher reads hi-bytes.
+        all_tbl_bases = sorted(table_accesses.keys())
+        interleaved_pairs = []  # list of (lo_base, hi_base)
+        interleaved_bases = set()
+
+        for b in all_tbl_bases:
+            if b + 1 in table_accesses and b not in interleaved_bases:
+                interleaved_pairs.append((b, b + 1))
+                interleaved_bases.add(b)
+                interleaved_bases.add(b + 1)
+
+        # --- Phase 4: Determine table sizes ---
+        sorted_tables = sorted(table_accesses.keys())
+        table_sizes = {}
+
+        for i, tbl_addr in enumerate(sorted_tables):
+            if i + 1 < len(sorted_tables):
+                gap = sorted_tables[i + 1] - tbl_addr
+                table_sizes[tbl_addr] = min(gap, 64)
+            else:
+                remaining = (base_addr + len(binary_data)) - tbl_addr
+                table_sizes[tbl_addr] = min(remaining, 64)
+
+        # Override sizes for confirmed split hi-byte tables using paired lo table
+        for hi_addr in confirmed_hi_tables:
+            best_lo = None
+            for lo_addr in confirmed_lo_tables:
+                if lo_addr < hi_addr:
+                    if best_lo is None or lo_addr > best_lo:
+                        best_lo = lo_addr
+            if best_lo is not None:
+                paired_size = hi_addr - best_lo
+                if 1 <= paired_size <= 64:
+                    table_sizes[hi_addr] = paired_size
+
+        # For interleaved tables, compute span from lo_base to next
+        # non-partner table base (skip the adjacent hi_base)
+        for lo_base, hi_base in interleaved_pairs:
+            next_base = None
+            for b in all_tbl_bases:
+                if b > hi_base:
+                    next_base = b
+                    break
+            if next_base is not None:
+                span = min(next_base - lo_base, 128)
+            else:
+                span = min((base_addr + len(binary_data)) - lo_base, 128)
+            table_sizes[lo_base] = span
+
+        # --- Phase 5: Patch confirmed split hi-byte tables ---
+        for tbl_addr in sorted(confirmed_hi_tables):
             tbl_off = tbl_addr - base_addr
-            # Read up to 64 bytes of the table (or until we hit code)
+            tbl_size = table_sizes.get(tbl_addr, 64)
+
+            for k in range(tbl_size):
+                pos = tbl_off + k
+                if pos >= len(binary_data) or pos in code_offsets:
+                    break
+                b = binary_data[pos]
+                if orig_hi_start <= b <= orig_hi_end:
+                    old_val = patched[pos]
+                    new_val = (old_val + hi_delta) & 0xFF
+                    if old_val != new_val and old_val == b:
+                        patched[pos] = new_val
+                        data_ptr_patches += 1
+                        report.append(
+                            f"  HI-TBL*  @ ${base_addr+pos:04X}: "
+                            f"${old_val:02X} -> ${new_val:02X} "
+                            f"(confirmed hi-byte table at ${tbl_addr:04X})"
+                        )
+
+        # --- Phase 6: Patch interleaved pointer tables ---
+        # Scan each interleaved region for 16-bit LE address pairs.
+        # Only patch the hi-byte of each valid pair.
+        # Require at least 2 valid pairs to confirm it's a real pointer
+        # table (not coincidental ASCII or padding data).
+        MIN_ILV_PAIRS = 2
+
+        for lo_base, hi_base in interleaved_pairs:
+            lo_off = lo_base - base_addr
+            span = table_sizes.get(lo_base, 64)
+
+            # First pass: collect valid pairs
+            valid_pairs = []
+            k = 0
+            while k + 1 < span:
+                pos_lo = lo_off + k
+                pos_hi = lo_off + k + 1
+                if pos_hi >= len(binary_data):
+                    break
+                if pos_lo in code_offsets or pos_hi in code_offsets:
+                    break
+                lo_byte = binary_data[pos_lo]
+                hi_byte = binary_data[pos_hi]
+                addr16 = lo_byte | (hi_byte << 8)
+
+                if base_addr <= addr16 < data_end_addr:
+                    valid_pairs.append((k, pos_lo, pos_hi, lo_byte, hi_byte))
+                k += 2
+
+            if len(valid_pairs) < MIN_ILV_PAIRS:
+                continue
+
+            # Second pass: patch hi-bytes of valid pairs
+            for _k, pos_lo, pos_hi, lo_byte, hi_byte in valid_pairs:
+                if orig_hi_start <= hi_byte <= orig_hi_end:
+                    old_val = patched[pos_hi]
+                    new_val = (old_val + hi_delta) & 0xFF
+                    if old_val != new_val and old_val == hi_byte:
+                        patched[pos_hi] = new_val
+                        data_ptr_patches += 1
+                        report.append(
+                            f"  ILV-TBL  @ ${base_addr+pos_lo:04X}: "
+                            f"${lo_byte:02X}{old_val:02X} -> "
+                            f"${lo_byte:02X}{new_val:02X} "
+                            f"(interleaved ptr table at "
+                            f"${lo_base:04X}/${hi_base:04X})"
+                        )
+
+        # --- Phase 7: Fallback heuristic for remaining tables ---
+        # For tables not handled above, apply conservative heuristic:
+        # - At least 30% of entries in the hi-byte page range
+        # - At least 3 such entries
+        # - At least 2 DISTINCT hi-byte values (rejects constant padding)
+        # - NOT a sorted/monotonic sequence (rejects parameter tables)
+        handled_tables = confirmed_hi_tables | interleaved_bases
+        for tbl_addr in sorted(table_accesses.keys()):
+            if tbl_addr in handled_tables:
+                continue
+            tbl_off = tbl_addr - base_addr
+            tbl_size = table_sizes.get(tbl_addr, 64)
+
             tbl_bytes = []
-            for k in range(64):
+            for k in range(tbl_size):
                 pos = tbl_off + k
                 if pos >= len(binary_data) or pos in code_offsets:
                     break
                 tbl_bytes.append(binary_data[pos])
 
-            if len(tbl_bytes) < 4:
+            if len(tbl_bytes) < 3:
                 continue
 
-            # Check if this looks like a split hi-byte table:
-            # High proportion of values in the address page range
-            hi_count = sum(1 for b in tbl_bytes if orig_hi_start <= b <= orig_hi_end)
-            ratio = hi_count / len(tbl_bytes)
+            in_range = [b for b in tbl_bytes if orig_hi_start <= b <= orig_hi_end]
+            hi_count = len(in_range)
+            ratio = hi_count / len(tbl_bytes) if tbl_bytes else 0
 
-            # Require >60% of bytes to be in the hi-byte range
-            # AND at least 4 such bytes
-            if ratio > 0.60 and hi_count >= 4:
-                for k, b in enumerate(tbl_bytes):
-                    pos = tbl_off + k
-                    if orig_hi_start <= b <= orig_hi_end:
-                        old_val = patched[pos]
-                        new_val = (old_val + hi_delta) & 0xFF
-                        if old_val != new_val and old_val == b:  # Not already patched
-                            patched[pos] = new_val
-                            data_ptr_patches += 1
-                            report.append(
-                                f"  HI-TBL   @ ${base_addr+pos:04X}: "
-                                f"${old_val:02X} -> ${new_val:02X} "
-                                f"(split hi-byte table at ${tbl_addr:04X})"
-                            )
+            if ratio <= 0.30 or hi_count < 3:
+                continue
+
+            # Reject if all in-range values are the same (padding/constant)
+            if len(set(in_range)) < 2:
+                continue
+
+            # Reject if in-range values are sorted (parameter/lookup table)
+            if in_range == sorted(in_range) or in_range == sorted(in_range, reverse=True):
+                continue
+
+            for k, b in enumerate(tbl_bytes):
+                pos = tbl_off + k
+                if orig_hi_start <= b <= orig_hi_end:
+                    old_val = patched[pos]
+                    new_val = (old_val + hi_delta) & 0xFF
+                    if old_val != new_val and old_val == b:
+                        patched[pos] = new_val
+                        data_ptr_patches += 1
+                        report.append(
+                            f"  HI-TBL   @ ${base_addr+pos:04X}: "
+                            f"${old_val:02X} -> ${new_val:02X} "
+                            f"(heuristic hi-byte table at ${tbl_addr:04X})"
+                        )
 
         stats['data_hib_patches'] = data_ptr_patches
 

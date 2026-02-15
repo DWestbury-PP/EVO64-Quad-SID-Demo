@@ -30,34 +30,31 @@ All four tunes are by **László Vincze (Vincenzo)** of **Singular Crew** (2017)
 
 No one had ever made a single playable 4-SID track before. The C64 normally has one SID chip at address `$D400`. The EVO64 Super Quattro maps four SIDs at `$D400`, `$D420`, `$D440`, and `$D460`.
 
-Standard SID tunes are compiled with hardcoded references to `$D400`. To play four tunes simultaneously, we need to:
+Standard SID tunes are compiled with hardcoded absolute addresses baked throughout their code and data — both references to their own load address (`$1000`) and to the SID register base (`$D400`). All four of our source tunes are compiled identically at `$1000` targeting `$D400`. To play them simultaneously, each must be relocated to its own memory region and retargeted to a different SID chip, without corrupting the music.
 
-1. **Relocate** each tune to a unique memory location (they all originally load at `$1000`)
-2. **Patch** each tune's SID register writes to target different SID addresses
-3. **Orchestrate** playback with a raster interrupt chain
+### The Solution: Three-Layer Patching
 
-### The Solution
+The key insight is that a SID-WIZARD binary contains three distinct categories of data that reference addresses, each requiring a different patching strategy:
 
-#### 1. SID Processing Tool (`tools/sid_processor.py`)
+#### Layer 1 — Code Relocation (329 patches per tune)
 
-A custom Python tool that:
-- **Parses** PSID v2 file headers to extract metadata
-- **Analyzes** the binary using **recursive descent disassembly** from known entry points to accurately distinguish code regions (~45%) from data regions (~55%)
-- **Relocates** all absolute address references within confirmed code (329 instruction-level patches per tune)
-- **Patches** SID register addresses (`$D400-$D41F` → target SID base)
-- **Scans** data regions for split hi/lo byte address tables using heuristics (for pattern and instrument pointer tables)
+A **recursive descent disassembler** traces execution from known entry points (init, play, and the jump table) to map every reachable instruction. This cleanly separates code (~45% of each binary) from data (~55%). Within confirmed code, every absolute address operand (`ABS`, `ABX`, `ABY`, `IND` modes) that falls within the tune's original address range is adjusted by the relocation delta. SID register references (`$D400-$D41F`) are redirected to the target SID chip address.
 
-#### 2. Raster Interrupt Chain (`src/QuadSID_Player.asm`)
+#### Layer 2 — Split Hi-Byte Tables (PPTRHI, INSPTHI)
 
-A KickAssembler program that:
-- Initializes all four tunes
-- Banks out ROMs (`$01 = $35`) for direct hardware IRQ vectors
-- Sets up a circular raster interrupt chain:
-  - **IRQ 1** @ raster line 0: plays Tune 1
-  - **IRQ 2** @ raster line 78: plays Tune 2
-  - **IRQ 3** @ raster line 156: plays Tune 3
-  - **IRQ 4** @ raster line 234: plays Tune 4
-- Displays a title screen with SID configuration info
+SID-WIZARD stores pattern and instrument pointers as **paired lo/hi byte tables** — one contiguous array of low bytes followed by a separate contiguous array of high bytes. These are identified through **code flow analysis**: the disassembler finds every `LDA abs,Y` / `LDA abs,X` instruction that accesses the data region, then traces up to 3 subsequent instructions to determine where the loaded value is stored. Values stored to an **odd zero-page address** (e.g., `$FF`) indicate the high byte of a 16-bit pointer pair, confirming the source table as a hi-byte address table. Table sizes are inferred from the gap between matched lo/hi table pairs.
+
+#### Layer 3 — Interleaved Pointer Tables (BIGFXTABLE, SUBTUNES)
+
+SID-WIZARD also has tables with **interleaved 16-bit little-endian address pairs** — alternating lo/hi bytes. These are detected by finding pairs of ABX/ABY table accesses whose base addresses differ by exactly 1 byte (`LDA table,Y` and `LDA table+1,Y`). This pattern is characteristic of the BIGFXTABLE (31 jump addresses to effects routines) and the SUBTUNES table (sequence pointers for each voice). Within each detected interleaved region, every byte pair forming a valid address in the tune's range has its hi-byte adjusted.
+
+### How the Architecture Was Decoded
+
+The patching strategy was informed by studying the **SID-WIZARD 1.94 native source code**, specifically the `exporter.asm` relocator. SID-WIZARD's own `relodata` function patches exactly four data table types during relocation: PPTRHI (pattern pointer hi-bytes), INSPTHI (instrument pointer hi-bytes), BIGFXTABLE (interleaved FX jump addresses), and SUBTUNES (interleaved sequence pointers). Our tool replicates this behavior through code analysis rather than requiring access to the relocation tables (which are not included in exported SID files).
+
+### The Raster Interrupt Chain
+
+The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and configures a circular VIC-II raster interrupt chain. With BASIC and KERNAL ROMs banked out (`$01 = $35`), the hardware IRQ vector at `$FFFE/$FFFF` is written directly. Each IRQ handler plays one tune, sets the next raster trigger line and handler address, then returns — creating a stable four-way round-robin at 50Hz per tune.
 
 ## Building
 
@@ -99,6 +96,12 @@ x64sc -sidextra 3 \
   build/QuadSID_Player.prg
 ```
 
+Or use the included launcher script:
+
+```bash
+./vice-quad-sid-play.sh
+```
+
 ## Running on Real Hardware
 
 Load the `.prg` file onto the EVO64 Super Quattro via SD2IEC, Ultimate II+, or other storage device. The board must have four SID chips installed with the QAPLA PLA configured for the `$D400`/`$D420`/`$D440`/`$D460` addressing scheme.
@@ -108,30 +111,17 @@ Load the `.prg` file onto the EVO64 Super Quattro via SD2IEC, Ultimate II+, or o
 ```
 quad-sid-player/
 ├── src/
-│   └── QuadSID_Player.asm      # Main KickAssembler source
+│   └── QuadSID_Player.asm      # 6510 assembly: IRQ chain + title screen
 ├── tools/
-│   └── sid_processor.py         # Python SID analysis & patching tool
-├── QuadCore-SIDs/               # Source SID music files
-│   ├── Quad_Core_tune_1.sid
-│   ├── Quad_Core_tune_2.sid
-│   ├── Quad_Core_tune_3.sid
-│   └── Quad_Core_tune_4.sid
-├── build/                       # Generated build artifacts
-│   ├── QuadSID_Player.prg       # Final C64 executable
-│   ├── tune1.bin - tune4.bin    # Patched tune binaries
-│   └── tune_config.inc          # Auto-generated KickAssembler config
-├── KickAssembler/               # KickAssembler cross-assembler
-│   ├── KickAss.jar
-│   └── Examples/                # KickAssembler example projects
-├── docs/                        # Reference documentation
-│   ├── SID-file-format.txt      # HVSC SID file format specification
-│   ├── Exotic-SID-formats.txt   # Extended SID format (v4E) docs
-│   ├── VICE-README.txt          # VICE emulator documentation
-│   └── vice.pdf                 # VICE full manual
-├── assets/                      # Project assets
-│   └── EVO64-SuperQuattaro.jpeg # EVO64 Super Quattro board photo
-├── build.sh                     # Build script
-└── README.md                    # This file
+│   └── sid_processor.py         # Python: SID parsing, disassembly, relocation
+├── QuadCore-SIDs/               # Source SID music files (4 tunes)
+├── build/                       # Generated artifacts (tune binaries, .prg)
+├── KickAssembler/               # KickAssembler cross-assembler (KickAss.jar)
+├── docs/                        # SID format specs, VICE documentation
+├── assets/                      # Project images
+├── build.sh                     # Build orchestration script
+├── vice-quad-sid-play.sh        # VICE launcher with quad-SID flags
+└── README.md
 ```
 
 ## Technical Details
@@ -140,26 +130,41 @@ quad-sid-player/
 
 ```
 $0801-$080C  BASIC SYS startup stub
-$0810-$0ABE  Main program (IRQ harness + title screen)
+$0810-$0CCB  Main program (IRQ harness + title screen)
 $1000-$1FD5  Tune 1 (original location, SID @ $D400)
 $3000-$3FDC  Tune 2 (relocated +$2000, SID @ $D420)
 $5000-$5F17  Tune 3 (relocated +$4000, SID @ $D440)
 $7000-$8224  Tune 4 (relocated +$6000, SID @ $D460)
 ```
 
-### SID-WIZARD Player Analysis
+### SID-WIZARD Player Binary Structure
 
-The recursive descent disassembler identified:
-- **1845 code bytes** per tune (identical player engine across all 4)
-- **822 instructions** per tune
-- **16 SID register references** per tune (voices via indexed addressing)
-- **329 internal absolute address references** requiring relocation
-- Code region: `$1000-$1A19` | Data region: `$1A1A` onwards
+Each exported SID file contains an identical player engine with tune-specific music data appended:
+
+```
+$1000-$100B  Jump table (JMP init, JMP play, ...)
+$100C-$109F  Tune header (title, author, metadata)
+$10A0-$1A19  Player code (1845 bytes, 822 instructions)
+$1A1A-end    Music data (patterns, instruments, pointer tables)
+```
+
+The recursive descent disassembler identified **329 absolute address references** within the player code — all requiring relocation. The player uses **self-modifying code** extensively: data table addresses are written into instruction operands at runtime, which is why static disassembly from entry points is essential for accurate code/data separation.
+
+### Data Table Patching Summary
+
+| Table Type | Detection Method | Patch Strategy | Typical Count |
+|-----------|-----------------|---------------|--------------|
+| PPTRHI (pattern ptr hi) | Flow analysis → odd ZP store | Every byte | 10-37 per tune |
+| INSPTHI (instrument ptr hi) | Flow analysis → odd ZP store | Every byte | 10-37 per tune |
+| BIGFXTABLE (FX jump addrs) | Adjacent ABX/ABY bases | Hi-byte of each 16-bit pair | 31 per tune |
+| SUBTUNES (sequence ptrs) | Adjacent ABX/ABY bases | Hi-byte of each 16-bit pair | 3 per tune |
 
 ### SID Register Patch Map
 
+Each tune has 16 SID register references that are retargeted:
+
 ```
-Voice 1: $D400-$D406 → $D4x0-$D4x6  (freq, pulse width, control, ADSR)
+Voice 1: $D400-$D406 → $D4x0-$D4x6  (frequency, pulse width, control, ADSR)
 Filter:  $D415-$D418 → $D4x5-$D4x8  (cutoff, resonance, mode/volume)
 ```
 

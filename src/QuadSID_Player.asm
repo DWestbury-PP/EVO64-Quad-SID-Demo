@@ -42,6 +42,8 @@ BasicUpstart2(start)
 // CIA registers
 .const CIA1_PORTA    = $DC00    // CIA 1 Port A (keyboard column select)
 .const CIA1_PORTB    = $DC01    // CIA 1 Port B (keyboard row read)
+.const CIA1_DDRA     = $DC02    // CIA 1 Data Direction Register A
+.const CIA1_DDRB     = $DC03    // CIA 1 Data Direction Register B
 .const CIA1_ICR      = $DC0D    // CIA 1 interrupt control
 .const CIA2_ICR      = $DD0D    // CIA 2 interrupt control
 
@@ -175,108 +177,105 @@ start:
             // ========================================
             //  MAIN LOOP: Keyboard polling for toggles
             //  Keys 1-4 toggle SID channels on/off
+            //
+            //  Uses KERNAL SCNKEY + GETIN for reliable
+            //  keyboard scanning (temporarily banks in
+            //  KERNAL ROM while IRQs are disabled).
+            //  GETIN returns PETSCII and naturally
+            //  debounces (one char per key press).
             // ========================================
+
+.const KERNAL_SCNKEY = $FF9F   // Scan keyboard matrix
+.const KERNAL_GETIN  = $FFE4   // Get character from buffer
+.const KEYBUF_COUNT  = $C6     // Keyboard buffer count
+
 main_loop:
-            // --- Scan column 0 (keys "1" and "3") ---
-            lda #KEY_COL0
-            sta CIA1_PORTA
-            lda CIA1_PORTB
+            // --------------------------------------------------------
+            //  PHASE 1: Scan keyboard via KERNAL (IRQs disabled)
+            //  SEI prevents our raster IRQ from firing while the
+            //  KERNAL ROM is banked in (IRQ vectors would be wrong).
+            // --------------------------------------------------------
+            sei                         // ** IRQs OFF **
 
-            // Check key "1" (row 7)
-            tax                         // Save port B state
-            and #KEY_ROW7_MASK
-            bne !key1_up+               // Bit set = NOT pressed
-            // Key 1 pressed - check debounce
-            lda key1_prev
-            bne !skip1+                 // Already held down, skip
-            lda #$01
-            sta key1_prev               // Mark as held
+            lda #$37                    // Bank in KERNAL + BASIC + I/O
+            sta PROC_PORT
+
+            // Ensure CIA1 DDRs are correct for keyboard scanning
+            lda #$FF
+            sta CIA1_DDRA               // Port A = all outputs
+            lda #$00
+            sta CIA1_DDRB               // Port B = all inputs
+
+            jsr KERNAL_SCNKEY           // Scan the keyboard matrix
+            jsr KERNAL_GETIN            // Get key from buffer (0 = none)
+
+            tax                         // Save key code in X
+
+            lda #$00
+            sta KEYBUF_COUNT            // Clear buffer (prevent repeat buildup)
+
+            lda #$35                    // Bank out KERNAL + BASIC, keep I/O
+            sta PROC_PORT
+
+            cli                         // ** IRQs ON - music resumes **
+
+            // --------------------------------------------------------
+            //  PHASE 2: Process key (IRQs enabled)
+            //  X holds the PETSCII code (or 0 if no key)
+            // --------------------------------------------------------
+            cpx #$00
+            beq main_continue           // No key pressed
+
+            cpx #$31                    // PETSCII "1"
+            beq toggle1
+            cpx #$32                    // PETSCII "2"
+            beq toggle2
+            cpx #$33                    // PETSCII "3"
+            beq toggle3
+            cpx #$34                    // PETSCII "4"
+            beq toggle4
+            jmp main_continue           // Unknown key, ignore
+
+toggle1:
             lda tune1_active
-            eor #$01                    // Toggle
-            sta tune1_active
-            beq !mute1+
-            // Re-init tune 1 when enabling
-            lda #$00
-            jsr TUNE1_INIT
-            jmp !skip1+
-!mute1:     jsr silence_sid1
-            jmp !skip1+
-!key1_up:   lda #$00
-            sta key1_prev               // Key released
-!skip1:
-
-            // Check key "3" (row 1)
-            txa                         // Restore port B state
-            and #KEY_ROW1_MASK
-            bne !key3_up+
-            lda key3_prev
-            bne !skip3+
-            lda #$01
-            sta key3_prev
-            lda tune3_active
             eor #$01
-            sta tune3_active
-            beq !mute3+
-            lda #$00
-            jsr TUNE3_INIT
-            jmp !skip3+
-!mute3:     jsr silence_sid3
-            jmp !skip3+
-!key3_up:   lda #$00
-            sta key3_prev
-!skip3:
+            sta tune1_active
+            bne main_continue           // Toggled ON: just resume playback
+            sei                         // Toggled OFF: silence SID atomically
+            jsr silence_sid1
+            cli
+            jmp main_continue
 
-            // --- Scan column 3 (keys "2" and "4") ---
-            lda #KEY_COL3
-            sta CIA1_PORTA
-            lda CIA1_PORTB
-
-            // Check key "2" (row 7)
-            tax
-            and #KEY_ROW7_MASK
-            bne !key2_up+
-            lda key2_prev
-            bne !skip2+
-            lda #$01
-            sta key2_prev
+toggle2:
             lda tune2_active
             eor #$01
             sta tune2_active
-            beq !mute2+
-            lda #$00
-            jsr TUNE2_INIT
-            jmp !skip2+
-!mute2:     jsr silence_sid2
-            jmp !skip2+
-!key2_up:   lda #$00
-            sta key2_prev
-!skip2:
+            bne main_continue
+            sei
+            jsr silence_sid2
+            cli
+            jmp main_continue
 
-            // Check key "4" (row 1)
-            txa
-            and #KEY_ROW1_MASK
-            bne !key4_up+
-            lda key4_prev
-            bne !skip4+
-            lda #$01
-            sta key4_prev
+toggle3:
+            lda tune3_active
+            eor #$01
+            sta tune3_active
+            bne main_continue
+            sei
+            jsr silence_sid3
+            cli
+            jmp main_continue
+
+toggle4:
             lda tune4_active
             eor #$01
             sta tune4_active
-            beq !mute4+
-            lda #$00
-            jsr TUNE4_INIT
-            jmp !skip4+
-!mute4:     jsr silence_sid4
-            jmp !skip4+
-!key4_up:   lda #$00
-            sta key4_prev
-!skip4:
+            bne main_continue
+            sei
+            jsr silence_sid4
+            cli
 
-            // Restore CIA1 port A (so joystick still works)
-            lda #$FF
-            sta CIA1_PORTA
-
+main_continue:
             // Update on-screen status display
             jsr update_status
 
@@ -486,11 +485,6 @@ tune1_active:   .byte $01          // 1 = playing, 0 = muted
 tune2_active:   .byte $01
 tune3_active:   .byte $01
 tune4_active:   .byte $01
-
-key1_prev:      .byte $00          // Debounce: 1 = held, 0 = released
-key2_prev:      .byte $00
-key3_prev:      .byte $00
-key4_prev:      .byte $00
 
 
 // ============================================================

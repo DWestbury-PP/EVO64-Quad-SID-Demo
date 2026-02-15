@@ -1,2 +1,10 @@
+# Python
 __pycache__/
+*.pyc
+
+# Build artifacts
+build/
 *.sym
+
+# macOS
+.DS_Store

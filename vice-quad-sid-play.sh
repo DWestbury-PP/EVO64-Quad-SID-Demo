@@ -5,6 +5,10 @@
 #
 #  Launches the Quad SID Player in VICE with 4 SID chips enabled.
 #
+#  Usage:
+#    ./vice-quad-sid-play.sh           # Normal mode
+#    ./vice-quad-sid-play.sh --debug   # Enable remote monitor
+#
 #  Configuration:
 #    Set the VICE_PATH environment variable to your x64sc binary.
 #    You can export it in your shell profile (~/.zshrc) or pass
@@ -15,6 +19,19 @@
 #
 #    Or:
 #      VICE_PATH="/path/to/x64sc.app" ./vice-quad-sid-play.sh
+#
+#  Debug mode (--debug):
+#    Enables VICE's remote monitor on port 6510.
+#    Connect with:  telnet 127.0.0.1 6510
+#
+#    Useful monitor commands:
+#      m $dc00 $dc03          - Dump CIA1 port/DDR registers
+#      io $dc00               - CIA1 chip state
+#      watch store $dc02      - Break on CIA1 DDRA writes
+#      watch store $dc00      - Break on keyboard column select
+#      break $xxxx            - Breakpoint at address
+#      r                      - Show CPU registers
+#      x                      - Resume emulation
 #
 # ============================================================
 
@@ -27,6 +44,16 @@ PRG_FILE="$PROJECT_ROOT/build/QuadSID_Player.prg"
 
 # Quad SID addressing configuration
 SID_OPTS="-sidextra 3 -sid2address 0xD420 -sid3address 0xD440 -sid4address 0xD460"
+
+# Check for --debug flag
+DEBUG_OPTS=""
+DEBUG_MODE=false
+for arg in "$@"; do
+    if [ "$arg" == "--debug" ]; then
+        DEBUG_MODE=true
+        DEBUG_OPTS="-remotemonitor -remotemonitoraddress ip4://127.0.0.1:6510 -keepmonopen"
+    fi
+done
 
 # Colors
 RED='\033[0;31m'
@@ -89,10 +116,23 @@ echo -e "    SID 3: ${GREEN}\$D440${NC} (extra 2)"
 echo -e "    SID 4: ${GREEN}\$D460${NC} (extra 3)"
 echo ""
 
+if $DEBUG_MODE; then
+    echo -e "  ${YELLOW}DEBUG MODE ENABLED${NC}"
+    echo -e "    Remote monitor: ${CYAN}telnet 127.0.0.1 6510${NC}"
+    echo ""
+    echo -e "  Quick-start debug commands:"
+    echo -e "    ${LGREY}m \$dc00 \$dc03${NC}       - CIA1 ports & DDRs"
+    echo -e "    ${LGREY}watch store \$dc02${NC}  - Catch DDRA corruption"
+    echo -e "    ${LGREY}watch store \$dc00${NC}  - Watch column select writes"
+    echo -e "    ${LGREY}watch load \$dc01${NC}   - Watch keyboard row reads"
+    echo -e "    ${LGREY}x${NC}                   - Resume emulation"
+    echo ""
+fi
+
 echo -e "${YELLOW}Launching VICE...${NC}"
 echo ""
 
-"$VICE_BIN" $SID_OPTS "$PRG_FILE" &
+"$VICE_BIN" $SID_OPTS $DEBUG_OPTS "$PRG_FILE" &
 
 echo -e "${GREEN}VICE launched! (PID: $!)${NC}"
 echo ""
