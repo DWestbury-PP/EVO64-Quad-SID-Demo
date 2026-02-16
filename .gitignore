@@ -2,8 +2,7 @@
 __pycache__/
 *.pyc
 
-# Build artifacts
-build/
+# Build intermediates
 *.sym
 
 # macOS
