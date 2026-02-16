@@ -56,13 +56,25 @@ for arg in "$@"; do
         hermit)
             DEMO="hermit"
             ;;
+        siggraph)
+            DEMO="siggraph"
+            ;;
         teenspirit|teen)
             DEMO="teenspirit"
+            ;;
+        hammer)
+            DEMO="hammer"
+            ;;
+        mon)
+            DEMO="mon"
+            ;;
+        twice)
+            DEMO="twice"
             ;;
         *)
             echo "Unknown argument: $arg"
             echo ""
-            echo "Usage: $0 [quadcore|megachase|hermit|teenspirit] [--debug]"
+            echo "Usage: $0 [quadcore|megachase|hermit|teenspirit|hammer|mon|twice] [--debug]"
             exit 1
             ;;
     esac
@@ -77,7 +89,11 @@ if [ -z "$DEMO" ]; then
     echo "    quadcore    QuadCore (Vincenzo / Singular Crew)"
     echo "    megachase   Mega Chase Theme (SHAD0WFAX)"
     echo "    hermit      4SID Example-Tune (HERMIT)"
+    echo "    siggraph    Siggraph Invitro 4SID (Narciso)"
     echo "    teenspirit  Smells Like Teen Spirit (John Ames)"
+    echo "    hammer      A-D Hammer 4SID (Rayden)"
+    echo "    mon         A-D Mon 4SID (Rayden)"
+    echo "    twice       A-D Twice 4SID (Rayden)"
     echo ""
     exit 0
 fi
@@ -102,11 +118,35 @@ case "$DEMO" in
         PRG_RAW="$PROJECT_ROOT/build/Hermit4SID_Player.prg"
         BUILD_CMD="./build.sh hermit"
         ;;
+    siggraph)
+        DEMO_NAME="Siggraph Invitro 4SID - Narciso / Onslaught"
+        PRG_EXO="$PROJECT_ROOT/build/SiggraphInvitro_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/SiggraphInvitro_Player.prg"
+        BUILD_CMD="./build.sh siggraph"
+        ;;
     teenspirit)
         DEMO_NAME="Smells Like Teen Spirit - John Ames / AmesSoft"
         PRG_EXO="$PROJECT_ROOT/build/TeenSpirit_Player_exo.prg"
         PRG_RAW="$PROJECT_ROOT/build/TeenSpirit_Player.prg"
         BUILD_CMD="./build.sh teenspirit"
+        ;;
+    hammer)
+        DEMO_NAME="A-D Hammer 4SID - Rayden / Alpha Flight"
+        PRG_EXO="$PROJECT_ROOT/build/Rayden_Hammer_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/Rayden_Hammer_Player.prg"
+        BUILD_CMD="./build.sh hammer"
+        ;;
+    mon)
+        DEMO_NAME="A-D Mon 4SID - Rayden / Alpha Flight"
+        PRG_EXO="$PROJECT_ROOT/build/Rayden_Mon_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/Rayden_Mon_Player.prg"
+        BUILD_CMD="./build.sh mon"
+        ;;
+    twice)
+        DEMO_NAME="A-D Twice 4SID - Rayden / Alpha Flight"
+        PRG_EXO="$PROJECT_ROOT/build/Rayden_Twice_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/Rayden_Twice_Player.prg"
+        BUILD_CMD="./build.sh twice"
         ;;
 esac
 
@@ -196,5 +236,9 @@ echo "  Available demos:"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh quadcore${NC}    QuadCore (4 separate SIDs)"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh megachase${NC}   Mega Chase (native 4-SID)"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh hermit${NC}      4SID Example (native 4-SID)"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh siggraph${NC}    Siggraph Invitro (native 4-SID)"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh teenspirit${NC}  Teen Spirit (4 separate SIDs)"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh hammer${NC}      A-D Hammer (native 4-SID RSID)"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh mon${NC}         A-D Mon (native 4-SID RSID)"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh twice${NC}       A-D Twice (native 4-SID RSID)"
 echo ""

@@ -343,6 +343,305 @@ build_teenspirit() {
 
 
 # ============================================================
+#  BUILD: SIGGRAPH INVITRO
+#  Native 4-SID PSID v4E → extract binary → assemble
+# ============================================================
+
+build_siggraph() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: Siggraph Invitro 4SID (Narciso)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    local SID_FILE="$SIDS_DIR/siggraph-invitro/Siggraph_Invitro_4SID.sid"
+
+    if [ ! -f "$SID_FILE" ]; then
+        echo -e "${RED}ERROR: SID file not found: $SID_FILE${NC}"
+        exit 1
+    fi
+
+    # Step 1: Extract binary from PSID v4E
+    echo -e "${YELLOW}  [1/4] Extracting binary from SID file...${NC}"
+    python3 -c "
+import struct
+with open('$SID_FILE', 'rb') as f:
+    data = f.read()
+version = struct.unpack('>H', data[4:6])[0]
+data_offset = struct.unpack('>H', data[6:8])[0]
+load_addr = struct.unpack('<H', data[data_offset:data_offset+2])[0]
+binary = data[data_offset+2:]
+print(f'  Format: PSID v{version:X} | Load: \${load_addr:04X} | Size: {len(binary)} bytes (\${len(binary):04X})')
+with open('$BUILD_DIR/siggraph_invitro.bin', 'wb') as f:
+    f.write(binary)
+"
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/SiggraphInvitro_Player.prg"
+    compile_asm "$SRC_DIR/SiggraphInvitro_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/SiggraphInvitro_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "siggraph invitro"
+    else
+        add_to_d64 "$OUTPUT_PRG" "siggraph invitro"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
+#  BUILD: RAYDEN HAMMER
+#  Native 4-SID RSID v4E → extract binary → assemble
+#  (Category C: 4 sub-tunes with individual init/play)
+# ============================================================
+
+build_rayden_hammer() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: A-D Hammer 4SID (Rayden)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    local SID_FILE="$SIDS_DIR/rayden-hammer/A-D_Hammer_4SID.sid"
+
+    if [ ! -f "$SID_FILE" ]; then
+        echo -e "${RED}ERROR: SID file not found: $SID_FILE${NC}"
+        exit 1
+    fi
+
+    # Step 1: Extract binary from RSID v4E (skip header + 2-byte load addr)
+    echo -e "${YELLOW}  [1/4] Extracting binary from SID file...${NC}"
+    python3 -c "
+import struct
+with open('$SID_FILE', 'rb') as f:
+    data = f.read()
+version = struct.unpack('>H', data[4:6])[0]
+data_offset = struct.unpack('>H', data[6:8])[0]
+load_addr = struct.unpack('<H', data[data_offset:data_offset+2])[0]
+binary = data[data_offset+2:]
+print(f'  Format: RSID v{version:X} | Load: \${load_addr:04X} | Size: {len(binary)} bytes (\${len(binary):04X})')
+with open('$BUILD_DIR/rayden_hammer.bin', 'wb') as f:
+    f.write(binary)
+"
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/Rayden_Hammer_Player.prg"
+    compile_asm "$SRC_DIR/Rayden_Hammer_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/Rayden_Hammer_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "a-d hammer"
+    else
+        add_to_d64 "$OUTPUT_PRG" "a-d hammer"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
+#  BUILD: RAYDEN MON
+#  Native 4-SID RSID v4E → extract binary → assemble
+#  (Category C: 4 sub-tunes with individual init/play)
+# ============================================================
+
+build_rayden_mon() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: A-D Mon 4SID (Rayden)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    local SID_FILE="$SIDS_DIR/rayden-mon/A-D_Mon_4SID.sid"
+
+    if [ ! -f "$SID_FILE" ]; then
+        echo -e "${RED}ERROR: SID file not found: $SID_FILE${NC}"
+        exit 1
+    fi
+
+    # Step 1: Extract binary from RSID v4E
+    echo -e "${YELLOW}  [1/4] Extracting binary from SID file...${NC}"
+    python3 -c "
+import struct
+with open('$SID_FILE', 'rb') as f:
+    data = f.read()
+version = struct.unpack('>H', data[4:6])[0]
+data_offset = struct.unpack('>H', data[6:8])[0]
+load_addr = struct.unpack('<H', data[data_offset:data_offset+2])[0]
+binary = data[data_offset+2:]
+print(f'  Format: RSID v{version:X} | Load: \${load_addr:04X} | Size: {len(binary)} bytes (\${len(binary):04X})')
+with open('$BUILD_DIR/rayden_mon.bin', 'wb') as f:
+    f.write(binary)
+"
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/Rayden_Mon_Player.prg"
+    compile_asm "$SRC_DIR/Rayden_Mon_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/Rayden_Mon_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "a-d mon"
+    else
+        add_to_d64 "$OUTPUT_PRG" "a-d mon"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
+#  BUILD: RAYDEN TWICE
+#  Native 4-SID RSID v4E → extract binary → assemble
+#  (Category C: 4 sub-tunes with individual init/play)
+# ============================================================
+
+build_rayden_twice() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: A-D Twice 4SID (Rayden)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    local SID_FILE="$SIDS_DIR/rayden-twice/A-D_Twice_4SID.sid"
+
+    if [ ! -f "$SID_FILE" ]; then
+        echo -e "${RED}ERROR: SID file not found: $SID_FILE${NC}"
+        exit 1
+    fi
+
+    # Step 1: Extract binary from RSID v4E
+    echo -e "${YELLOW}  [1/4] Extracting binary from SID file...${NC}"
+    python3 -c "
+import struct
+with open('$SID_FILE', 'rb') as f:
+    data = f.read()
+version = struct.unpack('>H', data[4:6])[0]
+data_offset = struct.unpack('>H', data[6:8])[0]
+load_addr = struct.unpack('<H', data[data_offset:data_offset+2])[0]
+binary = data[data_offset+2:]
+print(f'  Format: RSID v{version:X} | Load: \${load_addr:04X} | Size: {len(binary)} bytes (\${len(binary):04X})')
+with open('$BUILD_DIR/rayden_twice.bin', 'wb') as f:
+    f.write(binary)
+"
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/Rayden_Twice_Player.prg"
+    compile_asm "$SRC_DIR/Rayden_Twice_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/Rayden_Twice_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "a-d twice"
+    else
+        add_to_d64 "$OUTPUT_PRG" "a-d twice"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
 #  BUILD: HERMIT 4SID EXAMPLE
 #  Native 4-SID PSID v4E → extract binary → assemble
 # ============================================================
@@ -445,15 +744,35 @@ case "$DEMO" in
         build_hermit "$ACTION"
         ;;
 
+    siggraph)
+        build_siggraph "$ACTION"
+        ;;
+
     teenspirit|teen)
         build_teenspirit "$ACTION"
+        ;;
+
+    hammer)
+        build_rayden_hammer "$ACTION"
+        ;;
+
+    mon)
+        build_rayden_mon "$ACTION"
+        ;;
+
+    twice)
+        build_rayden_twice "$ACTION"
         ;;
 
     all)
         build_quadcore
         build_megachase
         build_hermit
+        build_siggraph
         build_teenspirit
+        build_rayden_hammer
+        build_rayden_mon
+        build_rayden_twice
         # Add SID tester utility to D64
         if [ -f "$TOOLS_DIR/multisid-tester.prg" ]; then
             echo ""
@@ -491,9 +810,25 @@ case "$DEMO" in
         echo "              Native 4-SID composition (PSID v4E)"
         echo -e "              Source: ${LGREY}sids/hermit-4sid-example/${NC}"
         echo ""
+        echo -e "    ${CYAN}siggraph${NC}    Siggraph Invitro 4SID by Narciso"
+        echo "              Native 4-SID composition (PSID v4E)"
+        echo -e "              Source: ${LGREY}sids/siggraph-invitro/${NC}"
+        echo ""
         echo -e "    ${CYAN}teenspirit${NC}  Smells Like Teen Spirit by John Ames"
         echo "              4 separate single-SID tunes, relocated + patched"
         echo -e "              Source: ${LGREY}sids/smells-like-team-spirit/${NC}"
+        echo ""
+        echo -e "    ${CYAN}hammer${NC}      A-D Hammer 4SID by Rayden"
+        echo "              Native 4-SID composition (RSID v4E, 4 sub-tunes)"
+        echo -e "              Source: ${LGREY}sids/rayden-hammer/${NC}"
+        echo ""
+        echo -e "    ${CYAN}mon${NC}         A-D Mon 4SID by Rayden"
+        echo "              Native 4-SID composition (RSID v4E, 4 sub-tunes)"
+        echo -e "              Source: ${LGREY}sids/rayden-mon/${NC}"
+        echo ""
+        echo -e "    ${CYAN}twice${NC}       A-D Twice 4SID by Rayden"
+        echo "              Native 4-SID composition (RSID v4E, 4 sub-tunes)"
+        echo -e "              Source: ${LGREY}sids/rayden-twice/${NC}"
         echo ""
         exit 0
         ;;
@@ -506,7 +841,11 @@ case "$DEMO" in
         echo -e "    ${CYAN}$0 quadcore${NC}        Build QuadCore demo"
         echo -e "    ${CYAN}$0 megachase${NC}       Build Mega Chase demo"
         echo -e "    ${CYAN}$0 hermit${NC}          Build Hermit 4SID Example demo"
+        echo -e "    ${CYAN}$0 siggraph${NC}        Build Siggraph Invitro demo"
         echo -e "    ${CYAN}$0 teenspirit${NC}      Build Teen Spirit demo"
+        echo -e "    ${CYAN}$0 hammer${NC}          Build Rayden Hammer demo"
+        echo -e "    ${CYAN}$0 mon${NC}             Build Rayden Mon demo"
+        echo -e "    ${CYAN}$0 twice${NC}           Build Rayden Twice demo"
         echo -e "    ${CYAN}$0 all${NC}             Build all demos"
         echo -e "    ${CYAN}$0 <demo> run${NC}      Build and launch in VICE"
         echo -e "    ${CYAN}$0 clean${NC}           Remove build artifacts"

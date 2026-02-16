@@ -1,0 +1,296 @@
+============================================================
+  INTEGRATING 4-SID TUNES INTO THE EVO64 SUPER QUATTRO
+============================================================
+
+OVERVIEW
+========
+
+This document describes the process of analyzing and integrating
+multi-SID music files into the EVO64 Super Quattro player
+framework. It serves as a practical guide for adding new 4-SID
+tracks to the collection.
+
+
+SID FORMAT CATEGORIES FOR INTEGRATION
+======================================
+
+Through analysis of various 4-SID files, we've identified four
+distinct categories based on how they can be integrated:
+
+
+Category A: Single-SID Files (Relocate + Patch)
+------------------------------------------------
+
+  Format:   PSID v2 (standard)
+  Example:  QuadCore (Vincenzo), Teen Spirit (John Ames)
+  Method:   Automated via sid_processor.py
+
+  These are 4 individual single-SID .sid files, each containing
+  one part of the arrangement. All load at the same address
+  (e.g. $3000) and all write to $D400.
+
+  Integration steps:
+    1. Relocate each tune to a unique base address
+    2. Patch SID register writes ($D400 -> $D420/$D440/$D460)
+    3. Use a 4-way raster IRQ chain to call each play routine
+
+  The sid_processor.py tool handles this automatically using
+  recursive descent disassembly to distinguish code from data,
+  ensuring only code operands are relocated/patched (not data
+  values that happen to look like addresses).
+
+  Player harness: QuadSID_Player.asm / TeenSpirit_Player.asm
+  Build: sid_processor.py <config_name>
+
+
+Category B: Native 4-SID, Single Play Routine (PSID v4E)
+---------------------------------------------------------
+
+  Format:   PSID v4E (extended header, callable init/play)
+  Example:  Mega Chase (SHAD0WFAX), HERMIT 4SID Example,
+            Siggraph Invitro (Narciso)
+  Method:   Extract binary, assemble with harness
+
+  These are natively composed 4-SID tunes with a single player
+  engine that drives all 4 SID chips from one play routine.
+  The SID file header specifies Init and Play addresses.
+
+  Integration steps:
+    1. Extract the binary (strip SID header + 2-byte load addr)
+    2. Create a player harness that:
+       - Banks out ROMs if binary overlaps $A000-$BFFF or $E000+
+       - Clears all 4 SID chips
+       - Calls JSR INIT (with A=0 for song 0)
+       - Sets up a single raster IRQ that calls JSR PLAY per frame
+    3. Import the binary at its original load address
+
+  IMPORTANT: Check if the Init/Play addresses fall in ROM shadow
+  areas ($A000-$BFFF = BASIC ROM, $D000-$DFFF = I/O, $E000-$FFFF
+  = Kernal ROM). If so, bank out ROMs BEFORE calling init.
+
+  Player harness: MegaChase_Player.asm / SiggraphInvitro_Player.asm
+  Build: Extract binary in build.sh, then compile
+
+
+Category C: Native 4-SID, Multiple Play Routines (RSID v4E)
+------------------------------------------------------------
+
+  Format:   RSID v4E (extended header, play address = $0000,
+            but sub-tunes have standard init/play entry points)
+  Example:  A-D Hammer, A-D Mon, A-D Twice (Rayden)
+  Method:   Strip wrapper, call sub-tune routines directly
+
+  These contain 4 independent SID-WIZARD player instances packed
+  into a single binary, each already targeting its own SID chip
+  address ($D400, $D420, $D440, $D460). A thin wrapper provides
+  the busy-wait main loop.
+
+  The play address in the SID header is $0000 because the init
+  routine never returns -- it enters its own busy-wait loop. But
+  the individual sub-tunes have standard callable entry points.
+
+  Internal structure (example: A-D Hammer):
+
+    $0FA0-$0FFF  Wrapper: SEI, init all 4, busy-loop play
+    $1000-$1EFF  Tune 1: init=$1000  play=$1003  -> $D400
+    $1F00-$2BFF  Tune 2: init=$1F00  play=$1F03  -> $D420
+    $2C00-$3CFF  Tune 3: init=$2C00  play=$2C03  -> $D440
+    $3D00-$4C82  Tune 4: init=$3D00  play=$3D03  -> $D460
+
+  The wrapper follows this exact pattern:
+
+    SEI
+    LDA #$00 / JSR tune1_init    ; Init all 4 sub-tunes
+    LDA #$00 / JSR tune2_init
+    LDA #$00 / JSR tune3_init
+    LDA #$00 / JSR tune4_init
+    loop:
+      LDA #raster / CMP $D012 / BNE loop   ; Busy-wait
+      JSR tune1_play             ; Play all 4 (with raster bars)
+      JSR tune2_play
+      JSR tune3_play
+      JSR tune4_play
+      LDA $DC01 / CMP #key      ; Check exit key
+      BNE loop
+      <clear all SIDs>
+      JMP $FE47                  ; Warm start
+
+  Integration steps:
+    1. Extract the full binary (strip SID header + 2-byte load addr)
+    2. Identify the 4 sub-tune base addresses from the init routine
+    3. Create a player harness that:
+       - Loads the full binary at its original address
+       - Calls JSR init for all 4 sub-tunes (A=0)
+       - Sets up a single raster IRQ that calls all 4 play routines
+    4. No relocation or SID patching needed -- each sub-tune
+       already writes to its own SID chip address
+
+  NOTE: The wrapper code is included in the binary but is harmless
+  since our player harness takes control before it executes.
+  We simply skip calling the wrapper's init address and instead
+  call each sub-tune's init directly.
+
+  Player harness: Rayden_Hammer_Player.asm (etc.)
+  Build: Extract binary in build.sh, then compile
+
+
+Category D: Self-Playing RSID (Not Yet Supported)
+--------------------------------------------------
+
+  Format:   RSID (any version), play address = $0000,
+            installs its own IRQ handler via $0314/$0315 or
+            $FFFE/$FFFF, uses CIA timers or other advanced tricks
+  Example:  (none encountered yet in our collection)
+  Method:   Manual analysis required
+
+  These tunes install their own interrupt handlers and cannot
+  be driven by an external player harness without significant
+  reverse engineering. Possible approaches:
+
+    - Let the tune install its IRQ, then intercept and redirect
+      the IRQ vector to add our own title screen code
+    - Disassemble and extract the play routine manually
+    - Use PSID64 to create a standalone .prg (loses custom UI)
+
+  These are rare in 4-SID context. Most multi-SID tunes use
+  SID-WIZARD which produces callable player instances.
+
+
+HOW TO IDENTIFY THE CATEGORY
+==============================
+
+  1. Check the SID header magic:
+     - "PSID" = PSID format
+     - "RSID" = RSID format
+
+  2. Check the Play Address (offset $0C, big-endian WORD):
+     - Non-zero (e.g. $1003) = callable play routine
+       -> Likely Category A or B
+     - $0000 = self-managing playback
+       -> Category C or D
+
+  3. Check the version (offset $04):
+     - $004E (78 decimal) = v4E extended header (native multi-SID)
+       -> Category B or C
+     - $0002 = standard PSID v2 (single-SID per file)
+       -> Category A (need 4 separate files)
+
+  4. For RSID with play=$0000, disassemble the init routine:
+     - If it contains JSR to 4 different init addresses followed
+       by a busy-wait loop with 4 JSR play calls:
+       -> Category C (wrapper around callable sub-tunes)
+     - If it writes to $0314/$0315 or $FFFE/$FFFF:
+       -> Category D (self-installing IRQ handler)
+
+  Quick decision tree:
+
+    Is magic "PSID"?
+      Yes -> Is play addr non-zero?
+        Yes -> Is it 4 separate .sid files?
+          Yes -> Category A (relocate + patch)
+          No  -> Category B (native, single play)
+        No  -> Unusual; analyze manually
+      No (RSID) -> Is version $004E?
+        Yes -> Disassemble init: wrapper with 4 JSRs?
+          Yes -> Category C (strip wrapper)
+          No  -> Category D (self-installing IRQ)
+        No  -> Probably not multi-SID
+
+
+ANALYSIS TOOLS
+===============
+
+  sid_processor.py   - Recursive descent disassembly, relocation,
+                       SID patching for Category A tunes
+
+  Python one-liners  - SID header parsing (see build.sh for
+                       binary extraction examples)
+
+  VICE monitor       - Runtime debugging (./vice-quad-sid-play.sh
+                       <demo> --debug, then telnet 127.0.0.1 6510)
+
+  Header analysis snippet (Python):
+
+    import struct
+    with open('tune.sid', 'rb') as f:
+        data = f.read()
+    magic       = data[0:4].decode('ascii')
+    version     = struct.unpack('>H', data[4:6])[0]
+    data_offset = struct.unpack('>H', data[6:8])[0]
+    load_addr   = struct.unpack('>H', data[8:10])[0]
+    init_addr   = struct.unpack('>H', data[10:12])[0]
+    play_addr   = struct.unpack('>H', data[12:14])[0]
+    title       = data[0x16:0x36].split(b'\x00')[0].decode()
+    author      = data[0x36:0x56].split(b'\x00')[0].decode()
+
+    print(f'{magic} v{version:X}')
+    print(f'Init: ${init_addr:04X}  Play: ${play_addr:04X}')
+
+
+KNOWN GOTCHAS
+==============
+
+  1. ROM SHADOW CONFLICTS
+     If the tune binary overlaps $A000-$BFFF (BASIC ROM) or
+     $E000-$FFFF (Kernal ROM), you must bank out ROMs by
+     setting $01 = $35 BEFORE calling the init routine.
+     Otherwise the CPU reads ROM instead of loaded code.
+     (See: Siggraph Invitro debug session)
+
+  2. SID-WIZARD PLAYER INSTANCES
+     SID-WIZARD player instances use standard entry points:
+       Init = base + 0  (JMP trampoline)
+       Play = base + 3  (JMP trampoline)
+     This holds for both PSID and RSID exports.
+
+  3. DATA vs CODE PATCHING
+     When relocating/patching (Category A), it's critical to
+     distinguish code operands from data bytes. A data table
+     containing $D4 or $30 (high bytes of $D400 or $3000) must
+     NOT be patched. The sid_processor.py tool uses recursive
+     descent disassembly to handle this correctly.
+
+  4. ZERO PAGE CONFLICTS
+     Multiple SID-WIZARD player instances may share the same
+     zero-page addresses. For Category A (sequential IRQ-driven
+     players), this is typically safe since each player runs to
+     completion before the next starts. For Category C, the
+     sub-tunes are separate instances and usually use different
+     ZP ranges (confirmed by SID-WIZARD's per-instance layout).
+
+
+REFERENCE: RAYDEN 4SID TUNES (Category C)
+==========================================
+
+  A-D Hammer 4SID - Patrick Zeh (Rayden) / Alpha Flight, 1998
+    RSID v4E | Binary: $0FA0-$4C82 (15,587 bytes)
+    Wrapper: $0FA0-$0FFF (96 bytes)
+    Tune 1: $1000/$1003 -> $D400
+    Tune 2: $1F00/$1F03 -> $D420
+    Tune 3: $2C00/$2C03 -> $D440
+    Tune 4: $3D00/$3D03 -> $D460
+
+  A-D Mon 4SID - Patrick Zeh (Rayden) / Alpha Flight, 1998
+    RSID v4E | Binary: $08B0-$3D2A (13,435 bytes)
+    Wrapper: $08B0-$08FF (80 bytes)
+    Tune 1: $0900/$0903 -> $D400
+    Tune 2: $1500/$1503 -> $D420
+    Tune 3: $2200/$2203 -> $D440
+    Tune 4: $3200/$3203 -> $D460
+
+  A-D Twice 4SID - Patrick Zeh (Rayden) / Alpha Flight, 1998
+    RSID v4E | Binary: $0F00-$493F (14,912 bytes)
+    Wrapper: $0F00-$0FFF (256 bytes)
+    Tune 1: $1000/$1003 -> $D400
+    Tune 2: $1D00/$1D03 -> $D420
+    Tune 3: $2A00/$2A03 -> $D440
+    Tune 4: $3A00/$3A03 -> $D460
+
+
+CHANGELOG
+=========
+
+  2026-02-16  Initial version. Documented Categories A-D based
+              on analysis of QuadCore, Teen Spirit, Mega Chase,
+              HERMIT 4SID Example, Siggraph Invitro, and
+              Rayden A-D tunes.
