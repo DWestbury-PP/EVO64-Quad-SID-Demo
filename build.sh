@@ -33,11 +33,13 @@ OUTPUT_PRG="$BUILD_DIR/QuadSID_Player.prg"
 # Set VICE_PATH env var to your x64sc binary or .app bundle
 VICE_PATH="${VICE_PATH:-/Users/dwestbury/Documents/Tech_Stuff/Electronics/Commodore Projects/C64 Emulation/vice-arm64-gtk3-3.10/bin/x64sc}"
 
-# Resolve the binary (handle .app bundles or direct paths)
+# Resolve the binary and c1541 tool (handle .app bundles or direct paths)
 if [[ "$VICE_PATH" == *.app ]]; then
     VICE_CMD="$VICE_PATH/Contents/Resources/bin/x64sc"
+    C1541_CMD="$VICE_PATH/Contents/Resources/bin/c1541"
 else
     VICE_CMD="$VICE_PATH"
+    C1541_CMD="$(dirname "$VICE_PATH")/c1541"
 fi
 
 # VICE Quad-SID configuration
@@ -166,10 +168,45 @@ else
     echo "  Install with: brew install exomizer"
 fi
 
-# ---- Step 4: Launch in VICE (if requested) ----
+# ---- Step 4: Create D64 disk image ----
+OUTPUT_D64="$BUILD_DIR/EVO64-SuperQuattro.d64"
+DISK_NAME="evo64 super quattro"
+DISK_ID="eq"
+D64_FILE_NAME="quad sid player"
+
+# Choose the best available PRG for the disk image
+if [ -f "$OUTPUT_EXO" ]; then
+    D64_SOURCE="$OUTPUT_EXO"
+    D64_LABEL="compressed"
+else
+    D64_SOURCE="$OUTPUT_PRG"
+    D64_LABEL="uncompressed"
+fi
+
+if [ -x "$C1541_CMD" ]; then
+    echo ""
+    echo -e "${YELLOW}Step 4: Creating D64 disk image...${NC}"
+    "$C1541_CMD" \
+        -format "$DISK_NAME,$DISK_ID" d64 "$OUTPUT_D64" \
+        -write "$D64_SOURCE" "$D64_FILE_NAME" 2>&1 | grep -v "OPENCBM\|libopencbm"
+
+    if [ $? -eq 0 ] || [ -f "$OUTPUT_D64" ]; then
+        D64_SIZE=$(wc -c < "$OUTPUT_D64" | tr -d ' ')
+        echo ""
+        echo -e "${GREEN}Disk image created!${NC}"
+        echo -e "  Output:   ${CYAN}$OUTPUT_D64${NC}"
+        echo -e "  Contains: ${CYAN}$D64_FILE_NAME${NC}  ($D64_LABEL)"
+    fi
+else
+    echo ""
+    echo -e "${YELLOW}Step 4: Skipping D64 creation (c1541 not found)${NC}"
+    echo "  c1541 is included with VICE. Set VICE_PATH to enable."
+fi
+
+# ---- Step 5: Launch in VICE (if requested) ----
 if [ "$1" = "run" ]; then
     echo ""
-    echo -e "${YELLOW}Step 4: Launching VICE with Quad-SID configuration...${NC}"
+    echo -e "${YELLOW}Step 5: Launching VICE with Quad-SID configuration...${NC}"
 
     if [ ! -x "$VICE_CMD" ]; then
         echo -e "${RED}WARNING: VICE not found at: $VICE_CMD${NC}"
@@ -199,6 +236,9 @@ echo "  Output files:"
 echo -e "    ${CYAN}$OUTPUT_PRG${NC}  (uncompressed)"
 if [ -f "$OUTPUT_EXO" ]; then
 echo -e "    ${CYAN}$OUTPUT_EXO${NC}  (Exomizer compressed)"
+fi
+if [ -f "$OUTPUT_D64" ]; then
+echo -e "    ${CYAN}$OUTPUT_D64${NC}  (D64 disk image)"
 fi
 echo ""
 echo "  To run in VICE:"
