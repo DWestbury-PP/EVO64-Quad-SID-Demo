@@ -72,6 +72,8 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 # Build a specific demo
 ./build.sh quadcore
 ./build.sh megachase
+./build.sh hermit
+./build.sh teenspirit
 
 # Build all demos
 ./build.sh all
@@ -79,6 +81,8 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 # Build and launch in VICE emulator
 ./build.sh quadcore run
 ./build.sh megachase run
+./build.sh hermit run
+./build.sh teenspirit run
 
 # Clean build artifacts
 ./build.sh clean
@@ -92,9 +96,11 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 Each demo produces an uncompressed PRG, an [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home)-compressed PRG (self-decrunching, ~60-77% smaller), and is added to a shared D64 disk image:
 
 ```
-build/EVO64-SuperQuattro.d64     # D64 floppy image with all demos
-build/QuadSID_Player_exo.prg     # QuadCore (~7KB compressed from ~31KB)
-build/MegaChase_Player_exo.prg   # Mega Chase (~6KB compressed from ~13KB)
+build/EVO64-SuperQuattro.d64       # D64 floppy image with all demos
+build/QuadSID_Player_exo.prg       # QuadCore (~7KB compressed from ~31KB)
+build/MegaChase_Player_exo.prg     # Mega Chase (~6KB compressed from ~13KB)
+build/Hermit4SID_Player_exo.prg    # 4SID Example (~5KB compressed from ~11KB)
+build/TeenSpirit_Player_exo.prg    # Teen Spirit (~4KB compressed from ~29KB)
 ```
 
 The compressed versions load and run identically to the uncompressed versions — just `LOAD` and `RUN`. If Exomizer is not installed, the build skips compression automatically.
@@ -106,6 +112,8 @@ VICE 3.10 supports up to 8 SID chips. Use the included launcher:
 ```bash
 ./vice-quad-sid-play.sh quadcore
 ./vice-quad-sid-play.sh megachase
+./vice-quad-sid-play.sh hermit
+./vice-quad-sid-play.sh teenspirit
 ```
 
 Or launch manually:
@@ -132,18 +140,30 @@ Four separate single-SID tunes playing simultaneously via a raster interrupt cha
 
 A native 4-SID composition exported from SID-WIZARD 1.9 using the PSID v4E format. The single binary already contains code targeting all four SID chips with stereo channel mapping (SIDs 1+3 left, SIDs 2+4 right).
 
+### 4SID Example-Tune (HERMIT, 2022)
+
+A native 4-SID composition by Mihály Horváth (HERMIT), the creator of SID-WIZARD. Also uses the PSID v4E format with stereo channel mapping. A showcase of the SID-WIZARD 1.9 multi-SID capabilities.
+
+### Smells Like Teen Spirit (John Ames / AmesSoft, 2003)
+
+A four-part cover of Nirvana's classic arranged across four separate SID files — main guitar, 2nd guitar, bass & drums, and melody. Like QuadCore, the four tunes are relocated and patched by `sid_processor.py` to target different memory addresses and SID chips. Originally composed for MOS 6581 at NTSC timing.
+
 ## Project Structure
 
 ```
 quad-sid-player/
 ├── src/
 │   ├── QuadSID_Player.asm      # QuadCore: 4-way raster IRQ chain
-│   └── MegaChase_Player.asm    # Mega Chase: single-call 4-SID player
+│   ├── MegaChase_Player.asm    # Mega Chase: single-call 4-SID player
+│   ├── Hermit4SID_Player.asm   # 4SID Example: single-call 4-SID player
+│   └── TeenSpirit_Player.asm   # Teen Spirit: 4-way raster IRQ chain
 ├── tools/
 │   └── sid_processor.py         # SID parsing, disassembly, relocation
 ├── sids/
 │   ├── quadcore/                # 4 separate single-SID tunes (.sid)
-│   └── megachase/               # Native 4-SID tune (.sid)
+│   ├── megachase/               # Native 4-SID tune (.sid)
+│   ├── hermit-4sid-example/     # Native 4-SID tune (.sid)
+│   └── smells-like-team-spirit/ # 4 separate single-SID tunes (.sid)
 ├── build/                       # Generated artifacts (.prg, .d64)
 ├── KickAssembler/               # KickAssembler cross-assembler
 ├── docs/                        # SID format specs, VICE documentation
@@ -214,8 +234,8 @@ The EVO64 is a hardware reimagining of the Commodore 64 that brings together dec
 ## Credits
 
 - **Hardware**: EVO64 Super Quattro by Auroscience
-- **Music**: László Vincze (Vincenzo) / Singular Crew, 2017
-- **Player Engine**: SID-WIZARD 1.7
+- **Music**: László Vincze (Vincenzo) / Singular Crew, 2017; SHAD0WFAX, 2025; HERMIT (Mihály Horváth), 2022; John Ames / AmesSoft, 2003
+- **Player Engines**: SID-WIZARD 1.7 / 1.9
 - **Compression**: [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home) by Magnus Lind
 - **Quad SID Player & Tooling**: EVO64 Project, 2026
 

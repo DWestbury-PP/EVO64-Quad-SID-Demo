@@ -56,10 +56,13 @@ for arg in "$@"; do
         hermit)
             DEMO="hermit"
             ;;
+        teenspirit|teen)
+            DEMO="teenspirit"
+            ;;
         *)
             echo "Unknown argument: $arg"
             echo ""
-            echo "Usage: $0 [quadcore|megachase] [--debug]"
+            echo "Usage: $0 [quadcore|megachase|hermit|teenspirit] [--debug]"
             exit 1
             ;;
     esac
@@ -74,6 +77,7 @@ if [ -z "$DEMO" ]; then
     echo "    quadcore    QuadCore (Vincenzo / Singular Crew)"
     echo "    megachase   Mega Chase Theme (SHAD0WFAX)"
     echo "    hermit      4SID Example-Tune (HERMIT)"
+    echo "    teenspirit  Smells Like Teen Spirit (John Ames)"
     echo ""
     exit 0
 fi
@@ -97,6 +101,12 @@ case "$DEMO" in
         PRG_EXO="$PROJECT_ROOT/build/Hermit4SID_Player_exo.prg"
         PRG_RAW="$PROJECT_ROOT/build/Hermit4SID_Player.prg"
         BUILD_CMD="./build.sh hermit"
+        ;;
+    teenspirit)
+        DEMO_NAME="Smells Like Teen Spirit - John Ames / AmesSoft"
+        PRG_EXO="$PROJECT_ROOT/build/TeenSpirit_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/TeenSpirit_Player.prg"
+        BUILD_CMD="./build.sh teenspirit"
         ;;
 esac
 
@@ -186,4 +196,5 @@ echo "  Available demos:"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh quadcore${NC}    QuadCore (4 separate SIDs)"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh megachase${NC}   Mega Chase (native 4-SID)"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh hermit${NC}      4SID Example (native 4-SID)"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh teenspirit${NC}  Teen Spirit (4 separate SIDs)"
 echo ""

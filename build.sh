@@ -172,7 +172,7 @@ build_quadcore() {
 
     # Step 1: Process SID files (relocate + patch)
     echo -e "${YELLOW}  [1/4] Processing SID files...${NC}"
-    python3 "$TOOLS_DIR/sid_processor.py"
+    python3 "$TOOLS_DIR/sid_processor.py" quadcore
     echo ""
 
     # Step 2: Compile
@@ -273,6 +273,62 @@ with open('$BUILD_DIR/megachase.bin', 'wb') as f:
         add_to_d64 "$OUTPUT_EXO" "mega chase"
     else
         add_to_d64 "$OUTPUT_PRG" "mega chase"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
+#  BUILD: TEEN SPIRIT
+#  4 separate single-SID tunes → relocate/patch → assemble
+# ============================================================
+
+build_teenspirit() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: Smells Like Teen Spirit (John Ames)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    # Step 1: Process SID files (relocate + patch)
+    echo -e "${YELLOW}  [1/4] Processing SID files...${NC}"
+    python3 "$TOOLS_DIR/sid_processor.py" teenspirit
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/TeenSpirit_Player.prg"
+    compile_asm "$SRC_DIR/TeenSpirit_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/TeenSpirit_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "teen spirit"
+    else
+        add_to_d64 "$OUTPUT_PRG" "teen spirit"
     fi
 
     # Launch if requested
@@ -389,10 +445,15 @@ case "$DEMO" in
         build_hermit "$ACTION"
         ;;
 
+    teenspirit|teen)
+        build_teenspirit "$ACTION"
+        ;;
+
     all)
         build_quadcore
         build_megachase
         build_hermit
+        build_teenspirit
         ;;
 
     clean)
@@ -424,6 +485,10 @@ case "$DEMO" in
         echo "              Native 4-SID composition (PSID v4E)"
         echo -e "              Source: ${LGREY}sids/hermit-4sid-example/${NC}"
         echo ""
+        echo -e "    ${CYAN}teenspirit${NC}  Smells Like Teen Spirit by John Ames"
+        echo "              4 separate single-SID tunes, relocated + patched"
+        echo -e "              Source: ${LGREY}sids/smells-like-team-spirit/${NC}"
+        echo ""
         exit 0
         ;;
 
@@ -435,6 +500,7 @@ case "$DEMO" in
         echo -e "    ${CYAN}$0 quadcore${NC}        Build QuadCore demo"
         echo -e "    ${CYAN}$0 megachase${NC}       Build Mega Chase demo"
         echo -e "    ${CYAN}$0 hermit${NC}          Build Hermit 4SID Example demo"
+        echo -e "    ${CYAN}$0 teenspirit${NC}      Build Teen Spirit demo"
         echo -e "    ${CYAN}$0 all${NC}             Build all demos"
         echo -e "    ${CYAN}$0 <demo> run${NC}      Build and launch in VICE"
         echo -e "    ${CYAN}$0 clean${NC}           Remove build artifacts"

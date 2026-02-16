@@ -875,47 +875,97 @@ def generate_kickasm_config(tune_configs, output_path):
 # MAIN PROCESSING PIPELINE
 # =============================================================================
 
-TUNE_CONFIG = [
-    {
-        'sid_file': 'sids/quadcore/Quad_Core_tune_1.sid',
-        'label': 'Quad Core (tune 1)',
-        'new_base': 0x1000,     # Keep at original location
-        'sid_offset': 0x00,     # SID 1 at $D400 (no change)
-        'output_bin': 'build/tune1.bin',
+CONFIGS = {
+    'quadcore': {
+        'name': 'QuadCore - Vincenzo / Singular Crew',
+        'config_inc': 'build/tune_config.inc',
+        'tunes': [
+            {
+                'sid_file': 'sids/quadcore/Quad_Core_tune_1.sid',
+                'label': 'Quad Core (tune 1)',
+                'new_base': 0x1000,
+                'sid_offset': 0x00,
+                'output_bin': 'build/tune1.bin',
+            },
+            {
+                'sid_file': 'sids/quadcore/Quad_Core_tune_2.sid',
+                'label': 'Quad Core (tune 2)',
+                'new_base': 0x3000,
+                'sid_offset': 0x20,
+                'output_bin': 'build/tune2.bin',
+            },
+            {
+                'sid_file': 'sids/quadcore/Quad_Core_tune_3.sid',
+                'label': 'Quad Core (tune 3)',
+                'new_base': 0x5000,
+                'sid_offset': 0x40,
+                'output_bin': 'build/tune3.bin',
+            },
+            {
+                'sid_file': 'sids/quadcore/Quad_Core_tune_4.sid',
+                'label': 'Quad Core (tune 4)',
+                'new_base': 0x7000,
+                'sid_offset': 0x60,
+                'output_bin': 'build/tune4.bin',
+            },
+        ],
     },
-    {
-        'sid_file': 'sids/quadcore/Quad_Core_tune_2.sid',
-        'label': 'Quad Core (tune 2)',
-        'new_base': 0x3000,     # Relocate to $3000
-        'sid_offset': 0x20,     # SID 2 at $D420
-        'output_bin': 'build/tune2.bin',
+    'teenspirit': {
+        'name': 'Smells Like Teen Spirit - John Ames / AmesSoft',
+        'config_inc': 'build/teenspirit_config.inc',
+        'tunes': [
+            {
+                'sid_file': 'sids/smells-like-team-spirit/Teen_Spirit_1_main_guitar.sid',
+                'label': 'Teen Spirit 1 (main guitar)',
+                'new_base': 0x1000,
+                'sid_offset': 0x00,
+                'output_bin': 'build/ts_tune1.bin',
+            },
+            {
+                'sid_file': 'sids/smells-like-team-spirit/Teen_Spirit_2_2nd_guitar.sid',
+                'label': 'Teen Spirit 2 (2nd guitar)',
+                'new_base': 0x3000,
+                'sid_offset': 0x20,
+                'output_bin': 'build/ts_tune2.bin',
+            },
+            {
+                'sid_file': 'sids/smells-like-team-spirit/Teen_Spirit_3_bass_and_drums.sid',
+                'label': 'Teen Spirit 3 (bass & drums)',
+                'new_base': 0x5000,
+                'sid_offset': 0x40,
+                'output_bin': 'build/ts_tune3.bin',
+            },
+            {
+                'sid_file': 'sids/smells-like-team-spirit/Teen_Spirit_4_melody.sid',
+                'label': 'Teen Spirit 4 (melody)',
+                'new_base': 0x7000,
+                'sid_offset': 0x60,
+                'output_bin': 'build/ts_tune4.bin',
+            },
+        ],
     },
-    {
-        'sid_file': 'sids/quadcore/Quad_Core_tune_3.sid',
-        'label': 'Quad Core (tune 3)',
-        'new_base': 0x5000,     # Relocate to $5000
-        'sid_offset': 0x40,     # SID 3 at $D440
-        'output_bin': 'build/tune3.bin',
-    },
-    {
-        'sid_file': 'sids/quadcore/Quad_Core_tune_4.sid',
-        'label': 'Quad Core (tune 4)',
-        'new_base': 0x7000,     # Relocate to $7000
-        'sid_offset': 0x60,     # SID 4 at $D460
-        'output_bin': 'build/tune4.bin',
-    },
-]
+}
 
 
-def process_all(project_root, analyze_only=False):
-    """Process all 4 SID files for the Quad-SID Player"""
+def process_all(project_root, config_name, analyze_only=False):
+    """Process all 4 SID files for the specified configuration"""
+    if config_name not in CONFIGS:
+        print(f"ERROR: Unknown config '{config_name}'")
+        print(f"Available configs: {', '.join(CONFIGS.keys())}")
+        sys.exit(1)
+
+    config = CONFIGS[config_name]
+    tune_config = config['tunes']
+    config_inc = config['config_inc']
+
     print("=" * 70)
-    print("  EVO64 Super Quattro - Quad SID Processor")
+    print(f"  EVO64 Super Quattro - Quad SID Processor")
+    print(f"  Config: {config['name']}")
     print("=" * 70)
 
     tune_configs_for_asm = []
 
-    for i, tc in enumerate(TUNE_CONFIG):
+    for i, tc in enumerate(tune_config):
         sid_path = os.path.join(project_root, tc['sid_file'])
         print(f"\n{'─' * 70}")
         print(f"  Tune {i+1}: {tc['label']}")
@@ -941,7 +991,6 @@ def process_all(project_root, analyze_only=False):
         entry_points = [init_addr, play_addr]
 
         # Also add targets of the jump table at load_addr
-        # SID-WIZARD typically has 3-4 JMP instructions at the start
         for j in range(0, min(12, len(binary)), 3):
             if binary[j] == 0x4C and j + 2 < len(binary):  # JMP opcode
                 target = binary[j + 1] | (binary[j + 2] << 8)
@@ -1005,16 +1054,16 @@ def process_all(project_root, analyze_only=False):
         })
 
     if not analyze_only and tune_configs_for_asm:
-        config_path = os.path.join(project_root, 'build', 'tune_config.inc')
+        config_path = os.path.join(project_root, config_inc)
         generate_kickasm_config(tune_configs_for_asm, config_path)
 
         print(f"\n{'=' * 70}")
         print(f"  PROCESSING COMPLETE")
         print(f"{'=' * 70}")
         print(f"\n  Generated Files:")
-        for tc in TUNE_CONFIG:
+        for tc in tune_config:
             print(f"    {tc['output_bin']}")
-        print(f"    build/tune_config.inc")
+        print(f"    {config_inc}")
 
         print(f"\n  Memory Map:")
         print(f"    $0801-$0900  Main program (BASIC SYS + IRQ harness)")
@@ -1029,7 +1078,7 @@ def process_all(project_root, analyze_only=False):
         print(f"      -sid2address 0xD420 \\")
         print(f"      -sid3address 0xD440 \\")
         print(f"      -sid4address 0xD460 \\")
-        print(f"      build/QuadSID_Player.prg")
+        print(f"      build/<player>.prg")
         print()
 
 
@@ -1039,8 +1088,21 @@ def main():
 
     analyze_only = '--analyze-only' in sys.argv
 
+    # Parse config name from arguments
+    config_name = 'quadcore'  # default
+    for arg in sys.argv[1:]:
+        if arg.startswith('--'):
+            continue
+        config_name = arg
+        break
+
+    if config_name not in CONFIGS:
+        print(f"Unknown config: {config_name}")
+        print(f"Available: {', '.join(CONFIGS.keys())}")
+        sys.exit(1)
+
     os.makedirs(os.path.join(project_root, 'build'), exist_ok=True)
-    process_all(project_root, analyze_only=analyze_only)
+    process_all(project_root, config_name, analyze_only=analyze_only)
 
 
 if __name__ == '__main__':
