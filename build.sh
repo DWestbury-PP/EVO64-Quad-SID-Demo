@@ -454,6 +454,12 @@ case "$DEMO" in
         build_megachase
         build_hermit
         build_teenspirit
+        # Add SID tester utility to D64
+        if [ -f "$TOOLS_DIR/multisid-tester.prg" ]; then
+            echo ""
+            echo -e "${YELLOW}  Adding SID Tester utility to D64...${NC}"
+            add_to_d64 "$TOOLS_DIR/multisid-tester.prg" "sid tester"
+        fi
         ;;
 
     clean)
