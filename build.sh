@@ -287,6 +287,80 @@ with open('$BUILD_DIR/megachase.bin', 'wb') as f:
 
 
 # ============================================================
+#  BUILD: HERMIT 4SID EXAMPLE
+#  Native 4-SID PSID v4E → extract binary → assemble
+# ============================================================
+
+build_hermit() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: 4SID Example-Tune (HERMIT)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    local SID_FILE="$SIDS_DIR/hermit-4sid-example/4SID-example.sid"
+
+    if [ ! -f "$SID_FILE" ]; then
+        echo -e "${RED}ERROR: SID file not found: $SID_FILE${NC}"
+        exit 1
+    fi
+
+    # Step 1: Extract binary from PSID v4E
+    echo -e "${YELLOW}  [1/4] Extracting binary from SID file...${NC}"
+    python3 -c "
+import struct
+with open('$SID_FILE', 'rb') as f:
+    data = f.read()
+version = struct.unpack('>H', data[4:6])[0]
+data_offset = struct.unpack('>H', data[6:8])[0]
+load_addr = struct.unpack('<H', data[data_offset:data_offset+2])[0]
+binary = data[data_offset+2:]
+print(f'  Format: PSID v{version:X} | Load: \${load_addr:04X} | Size: {len(binary)} bytes (\${len(binary):04X})')
+with open('$BUILD_DIR/hermit4sid.bin', 'wb') as f:
+    f.write(binary)
+"
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/Hermit4SID_Player.prg"
+    compile_asm "$SRC_DIR/Hermit4SID_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/Hermit4SID_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "4sid example"
+    else
+        add_to_d64 "$OUTPUT_PRG" "4sid example"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
 #  MAIN ENTRY POINT
 # ============================================================
 
@@ -311,9 +385,14 @@ case "$DEMO" in
         build_megachase "$ACTION"
         ;;
 
+    hermit)
+        build_hermit "$ACTION"
+        ;;
+
     all)
         build_quadcore
         build_megachase
+        build_hermit
         ;;
 
     clean)
@@ -341,6 +420,10 @@ case "$DEMO" in
         echo "              Native 4-SID composition (PSID v4E)"
         echo -e "              Source: ${LGREY}sids/megachase/${NC}"
         echo ""
+        echo -e "    ${CYAN}hermit${NC}      4SID Example-Tune by HERMIT"
+        echo "              Native 4-SID composition (PSID v4E)"
+        echo -e "              Source: ${LGREY}sids/hermit-4sid-example/${NC}"
+        echo ""
         exit 0
         ;;
 
@@ -351,6 +434,7 @@ case "$DEMO" in
         echo "  Commands:"
         echo -e "    ${CYAN}$0 quadcore${NC}        Build QuadCore demo"
         echo -e "    ${CYAN}$0 megachase${NC}       Build Mega Chase demo"
+        echo -e "    ${CYAN}$0 hermit${NC}          Build Hermit 4SID Example demo"
         echo -e "    ${CYAN}$0 all${NC}             Build all demos"
         echo -e "    ${CYAN}$0 <demo> run${NC}      Build and launch in VICE"
         echo -e "    ${CYAN}$0 clean${NC}           Remove build artifacts"

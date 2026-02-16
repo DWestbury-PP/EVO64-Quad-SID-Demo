@@ -53,6 +53,9 @@ for arg in "$@"; do
         megachase|mega)
             DEMO="megachase"
             ;;
+        hermit)
+            DEMO="hermit"
+            ;;
         *)
             echo "Unknown argument: $arg"
             echo ""
@@ -70,6 +73,7 @@ if [ -z "$DEMO" ]; then
     echo "  Available demos:"
     echo "    quadcore    QuadCore (Vincenzo / Singular Crew)"
     echo "    megachase   Mega Chase Theme (SHAD0WFAX)"
+    echo "    hermit      4SID Example-Tune (HERMIT)"
     echo ""
     exit 0
 fi
@@ -80,13 +84,19 @@ case "$DEMO" in
         DEMO_NAME="QuadCore - Vincenzo / Singular Crew"
         PRG_EXO="$PROJECT_ROOT/build/QuadSID_Player_exo.prg"
         PRG_RAW="$PROJECT_ROOT/build/QuadSID_Player.prg"
-        BUILD_CMD="./build.sh"
+        BUILD_CMD="./build.sh quadcore"
         ;;
     megachase)
         DEMO_NAME="Mega Chase Theme - SHAD0WFAX"
         PRG_EXO="$PROJECT_ROOT/build/MegaChase_Player_exo.prg"
         PRG_RAW="$PROJECT_ROOT/build/MegaChase_Player.prg"
-        BUILD_CMD="./build-megachase.sh"
+        BUILD_CMD="./build.sh megachase"
+        ;;
+    hermit)
+        DEMO_NAME="4SID Example-Tune - HERMIT"
+        PRG_EXO="$PROJECT_ROOT/build/Hermit4SID_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/Hermit4SID_Player.prg"
+        BUILD_CMD="./build.sh hermit"
         ;;
 esac
 
@@ -175,4 +185,5 @@ echo ""
 echo "  Available demos:"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh quadcore${NC}    QuadCore (4 separate SIDs)"
 echo -e "    ${CYAN}./vice-quad-sid-play.sh megachase${NC}   Mega Chase (native 4-SID)"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh hermit${NC}      4SID Example (native 4-SID)"
 echo ""
