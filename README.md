@@ -63,6 +63,7 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 - **Python 3** (for the SID processor tool)
 - **Java** (for KickAssembler) — install via `brew install openjdk`
 - **KickAssembler** (included in `KickAssembler/KickAss.jar`)
+- **Exomizer** (optional, for PRG compression) — install via `brew install exomizer`
 
 ### Build Commands
 
@@ -82,7 +83,12 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 
 ### Output
 
-The build produces `build/QuadSID_Player.prg` (~31KB), ready to load on a real C64 or in an emulator.
+The build produces two files:
+
+- **`build/QuadSID_Player.prg`** (~31KB) — uncompressed, ready to load and run
+- **`build/QuadSID_Player_exo.prg`** (~7KB) — compressed with [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home), a self-decrunching executable that decompresses at load time
+
+The compressed version reduces the file size by ~77%, significantly improving load times from floppy disk or SD2IEC. It runs identically to the uncompressed version — just `LOAD` and `RUN`. If Exomizer is not installed, the build skips compression and produces only the uncompressed PRG.
 
 ## Testing in VICE
 
@@ -187,6 +193,7 @@ The EVO64 is a hardware reimagining of the Commodore 64 that brings together dec
 - **Hardware**: EVO64 Super Quattro by the EVO64 Project
 - **Music**: László Vincze (Vincenzo) / Singular Crew, 2017
 - **Player Engine**: SID-WIZARD 1.7
+- **Compression**: [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home) by Magnus Lind
 - **Quad SID Player & Tooling**: EVO64 Project, 2026
 
 ## License

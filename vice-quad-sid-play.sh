@@ -40,7 +40,15 @@ VICE_PATH="${VICE_PATH:-/Users/dwestbury/Documents/Tech_Stuff/Electronics/Commod
 
 # Project paths
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-PRG_FILE="$PROJECT_ROOT/build/QuadSID_Player.prg"
+PRG_EXO="$PROJECT_ROOT/build/QuadSID_Player_exo.prg"
+PRG_RAW="$PROJECT_ROOT/build/QuadSID_Player.prg"
+
+# Prefer compressed version if available
+if [ -f "$PRG_EXO" ]; then
+    PRG_FILE="$PRG_EXO"
+else
+    PRG_FILE="$PRG_RAW"
+fi
 
 # Quad SID addressing configuration
 SID_OPTS="-sidextra 3 -sid2address 0xD420 -sid3address 0xD440 -sid4address 0xD460"

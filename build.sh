@@ -141,10 +141,35 @@ else
     exit 1
 fi
 
-# ---- Step 3: Launch in VICE (if requested) ----
+# ---- Step 3: Compress with Exomizer ----
+OUTPUT_EXO="$BUILD_DIR/QuadSID_Player_exo.prg"
+
+if command -v exomizer &> /dev/null; then
+    echo ""
+    echo -e "${YELLOW}Step 3: Compressing with Exomizer...${NC}"
+    exomizer sfx sys -t64 -n -o "$OUTPUT_EXO" "$OUTPUT_PRG"
+
+    if [ $? -eq 0 ]; then
+        EXO_SIZE=$(wc -c < "$OUTPUT_EXO" | tr -d ' ')
+        RATIO=$(( (FILE_SIZE - EXO_SIZE) * 100 / FILE_SIZE ))
+        echo ""
+        echo -e "${GREEN}Compression successful!${NC}"
+        echo -e "  Original:   ${CYAN}$FILE_SIZE bytes${NC}"
+        echo -e "  Compressed: ${CYAN}$EXO_SIZE bytes${NC}  (${RATIO}% reduction)"
+        echo -e "  Output:     ${CYAN}$OUTPUT_EXO${NC}"
+    else
+        echo -e "${RED}WARNING: Exomizer compression failed. Uncompressed PRG still available.${NC}"
+    fi
+else
+    echo ""
+    echo -e "${YELLOW}Step 3: Skipping compression (Exomizer not installed)${NC}"
+    echo "  Install with: brew install exomizer"
+fi
+
+# ---- Step 4: Launch in VICE (if requested) ----
 if [ "$1" = "run" ]; then
     echo ""
-    echo -e "${YELLOW}Step 3: Launching VICE with Quad-SID configuration...${NC}"
+    echo -e "${YELLOW}Step 4: Launching VICE with Quad-SID configuration...${NC}"
 
     if [ ! -x "$VICE_CMD" ]; then
         echo -e "${RED}WARNING: VICE not found at: $VICE_CMD${NC}"
@@ -169,6 +194,12 @@ echo ""
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}  Build Complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
+echo ""
+echo "  Output files:"
+echo -e "    ${CYAN}$OUTPUT_PRG${NC}  (uncompressed)"
+if [ -f "$OUTPUT_EXO" ]; then
+echo -e "    ${CYAN}$OUTPUT_EXO${NC}  (Exomizer compressed)"
+fi
 echo ""
 echo "  To run in VICE:"
 echo -e "  ${CYAN}./vice-quad-sid-play.sh${NC}"
