@@ -191,7 +191,7 @@ The EVO64 is a hardware reimagining of the Commodore 64 that brings together dec
 
 ## Credits
 
-- **Hardware**: EVO64 Super Quattro by the EVO64 Project
+- **Hardware**: EVO64 Super Quattro by Auroscience
 - **Music**: László Vincze (Vincenzo) / Singular Crew, 2017
 - **Player Engine**: SID-WIZARD 1.7
 - **Compression**: [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home) by Magnus Lind
