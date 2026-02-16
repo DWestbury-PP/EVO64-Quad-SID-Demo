@@ -1,13 +1,17 @@
 #!/bin/bash
 # ============================================================
-#  EVO64 Super Quattro - Quad SID Player Build Script
+#  EVO64 Super Quattro - Unified Build Script
 # ============================================================
 #
+#  Builds 4-SID demos for the EVO64 Super Quattro.
+#
 #  Usage:
-#    ./build.sh              Build the project
-#    ./build.sh run          Build and launch in VICE
-#    ./build.sh clean        Remove build artifacts
-#    ./build.sh process      Only run SID processor (no compile)
+#    ./build.sh quadcore          Build QuadCore demo
+#    ./build.sh megachase         Build Mega Chase demo
+#    ./build.sh all               Build all demos
+#    ./build.sh clean             Remove all build artifacts
+#    ./build.sh list              List available demos
+#    ./build.sh <demo> run        Build and launch in VICE
 #
 # ============================================================
 
@@ -23,17 +27,13 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 SRC_DIR="$PROJECT_ROOT/src"
 TOOLS_DIR="$PROJECT_ROOT/tools"
+SIDS_DIR="$PROJECT_ROOT/sids"
 KICKASS_JAR="$PROJECT_ROOT/KickAssembler/KickAss.jar"
 
-# Source files
-MAIN_ASM="$SRC_DIR/QuadSID_Player.asm"
-OUTPUT_PRG="$BUILD_DIR/QuadSID_Player.prg"
-
 # VICE emulator
-# Set VICE_PATH env var to your x64sc binary or .app bundle
 VICE_PATH="${VICE_PATH:-/Users/dwestbury/Documents/Tech_Stuff/Electronics/Commodore Projects/C64 Emulation/vice-arm64-gtk3-3.10/bin/x64sc}"
 
-# Resolve the binary and c1541 tool (handle .app bundles or direct paths)
+# Resolve VICE binary and c1541 tool
 if [[ "$VICE_PATH" == *.app ]]; then
     VICE_CMD="$VICE_PATH/Contents/Resources/bin/x64sc"
     C1541_CMD="$VICE_PATH/Contents/Resources/bin/c1541"
@@ -45,186 +45,336 @@ fi
 # VICE Quad-SID configuration
 VICE_SID_OPTS="-sidextra 3 -sid2address 0xD420 -sid3address 0xD440 -sid4address 0xD460"
 
+# D64 disk image (shared across all demos)
+OUTPUT_D64="$BUILD_DIR/EVO64-SuperQuattro.d64"
+DISK_NAME="evo64 super quattro"
+DISK_ID="eq"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
+
+
+# ============================================================
+#  HELPER FUNCTIONS
+# ============================================================
+
+check_java() {
+    if ! command -v java &> /dev/null; then
+        echo -e "${RED}ERROR: Java is not installed.${NC}"
+        echo "  KickAssembler requires Java. Install with: brew install openjdk"
+        exit 1
+    fi
+}
+
+check_kickass() {
+    if [ ! -f "$KICKASS_JAR" ]; then
+        echo -e "${RED}ERROR: KickAssembler not found at: $KICKASS_JAR${NC}"
+        echo "  Please ensure KickAss.jar is in the KickAssembler/ directory."
+        exit 1
+    fi
+}
+
+compile_asm() {
+    local asm_file="$1"
+    local output_prg="$2"
+
+    java -jar "$KICKASS_JAR" \
+        "$asm_file" \
+        -odir "$BUILD_DIR" \
+        -o "$output_prg" \
+        -showmem \
+        -symbolfile
+}
+
+compress_exomizer() {
+    local input_prg="$1"
+    local output_exo="$2"
+
+    if command -v exomizer &> /dev/null; then
+        echo ""
+        echo -e "${YELLOW}  Compressing with Exomizer...${NC}"
+        exomizer sfx sys -t64 -n -o "$output_exo" "$input_prg"
+
+        if [ $? -eq 0 ]; then
+            local orig_size=$(wc -c < "$input_prg" | tr -d ' ')
+            local exo_size=$(wc -c < "$output_exo" | tr -d ' ')
+            local ratio=$(( (orig_size - exo_size) * 100 / orig_size ))
+            echo ""
+            echo -e "${GREEN}  Compression: ${CYAN}$orig_size${NC} -> ${CYAN}$exo_size bytes${NC}  (${ratio}% reduction)"
+        fi
+    else
+        echo ""
+        echo -e "${YELLOW}  Skipping compression (install with: brew install exomizer)${NC}"
+    fi
+}
+
+add_to_d64() {
+    local prg_file="$1"
+    local d64_name="$2"
+
+    if [ ! -x "$C1541_CMD" ]; then
+        echo -e "${YELLOW}  Skipping D64 (c1541 not found)${NC}"
+        return
+    fi
+
+    # Create disk image if it doesn't exist
+    if [ ! -f "$OUTPUT_D64" ]; then
+        echo -e "  Creating D64 disk image..."
+        "$C1541_CMD" \
+            -format "$DISK_NAME,$DISK_ID" d64 "$OUTPUT_D64" \
+            2>&1 | grep -v "OPENCBM\|libopencbm"
+    fi
+
+    # Delete existing file if present, then write new one
+    "$C1541_CMD" \
+        -attach "$OUTPUT_D64" \
+        -delete "$d64_name" \
+        -write "$prg_file" "$d64_name" \
+        2>&1 | grep -v "OPENCBM\|libopencbm"
+
+    echo -e "  ${GREEN}Added to D64:${NC} ${CYAN}$d64_name${NC}"
+}
+
+launch_vice() {
+    local prg_file="$1"
+
+    echo ""
+    echo -e "${YELLOW}Launching VICE with Quad-SID configuration...${NC}"
+
+    if [ ! -x "$VICE_CMD" ]; then
+        echo -e "${RED}WARNING: VICE not found at: $VICE_CMD${NC}"
+        echo "  Set VICE_PATH to your x64sc installation."
+        return
+    fi
+
+    "$VICE_CMD" $VICE_SID_OPTS "$prg_file" &
+    echo -e "${GREEN}VICE launched! (PID: $!)${NC}"
+}
+
+
+# ============================================================
+#  BUILD: QUADCORE
+#  4 separate single-SID tunes → relocate/patch → assemble
+# ============================================================
+
+build_quadcore() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: QuadCore (Vincenzo / Singular Crew)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    # Step 1: Process SID files (relocate + patch)
+    echo -e "${YELLOW}  [1/4] Processing SID files...${NC}"
+    python3 "$TOOLS_DIR/sid_processor.py"
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/QuadSID_Player.prg"
+    compile_asm "$SRC_DIR/QuadSID_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/QuadSID_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "quad sid player"
+    else
+        add_to_d64 "$OUTPUT_PRG" "quad sid player"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
+#  BUILD: MEGACHASE
+#  Native 4-SID PSID v4E → extract binary → assemble
+# ============================================================
+
+build_megachase() {
+    local DO_RUN="$1"
+
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}  Building: Mega Chase Theme (SHAD0WFAX)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo ""
+
+    local SID_FILE="$SIDS_DIR/megachase/megachase.sid"
+
+    if [ ! -f "$SID_FILE" ]; then
+        echo -e "${RED}ERROR: SID file not found: $SID_FILE${NC}"
+        exit 1
+    fi
+
+    # Step 1: Extract binary from PSID v4E
+    echo -e "${YELLOW}  [1/4] Extracting binary from SID file...${NC}"
+    python3 -c "
+import struct
+with open('$SID_FILE', 'rb') as f:
+    data = f.read()
+version = struct.unpack('>H', data[4:6])[0]
+data_offset = struct.unpack('>H', data[6:8])[0]
+load_addr = struct.unpack('<H', data[data_offset:data_offset+2])[0]
+binary = data[data_offset+2:]
+print(f'  Format: PSID v{version:X} | Load: \${load_addr:04X} | Size: {len(binary)} bytes (\${len(binary):04X})')
+with open('$BUILD_DIR/megachase.bin', 'wb') as f:
+    f.write(binary)
+"
+    echo ""
+
+    # Step 2: Compile
+    echo -e "${YELLOW}  [2/4] Compiling with KickAssembler...${NC}"
+    check_java
+    check_kickass
+
+    local OUTPUT_PRG="$BUILD_DIR/MegaChase_Player.prg"
+    compile_asm "$SRC_DIR/MegaChase_Player.asm" "$OUTPUT_PRG"
+
+    local FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}  Build OK:${NC} ${CYAN}$FILE_SIZE bytes${NC}"
+
+    # Step 3: Compress
+    echo -e "${YELLOW}  [3/4] Compressing...${NC}"
+    local OUTPUT_EXO="$BUILD_DIR/MegaChase_Player_exo.prg"
+    compress_exomizer "$OUTPUT_PRG" "$OUTPUT_EXO"
+
+    # Step 4: Add to D64
+    echo ""
+    echo -e "${YELLOW}  [4/4] Updating D64 disk image...${NC}"
+    if [ -f "$OUTPUT_EXO" ]; then
+        add_to_d64 "$OUTPUT_EXO" "mega chase"
+    else
+        add_to_d64 "$OUTPUT_PRG" "mega chase"
+    fi
+
+    # Launch if requested
+    if [ "$DO_RUN" = "run" ]; then
+        if [ -f "$OUTPUT_EXO" ]; then
+            launch_vice "$OUTPUT_EXO"
+        else
+            launch_vice "$OUTPUT_PRG"
+        fi
+    fi
+}
+
+
+# ============================================================
+#  MAIN ENTRY POINT
+# ============================================================
 
 echo ""
 echo -e "${CYAN}============================================${NC}"
-echo -e "${CYAN}  EVO64 Super Quattro - Quad SID Player${NC}"
+echo -e "${CYAN}  EVO64 Super Quattro - 4-SID Demo Builder${NC}"
 echo -e "${CYAN}============================================${NC}"
-echo ""
 
 # Create build directory
 mkdir -p "$BUILD_DIR"
 
-# ---- Handle commands ----
+# Parse arguments
+DEMO="${1:-}"
+ACTION="${2:-}"
 
-case "${1:-build}" in
+case "$DEMO" in
+    quadcore|quad)
+        build_quadcore "$ACTION"
+        ;;
+
+    megachase|mega)
+        build_megachase "$ACTION"
+        ;;
+
+    all)
+        build_quadcore
+        build_megachase
+        ;;
+
     clean)
+        echo ""
         echo -e "${YELLOW}Cleaning build artifacts...${NC}"
         rm -f "$BUILD_DIR"/*.bin
         rm -f "$BUILD_DIR"/*.prg
         rm -f "$BUILD_DIR"/*.inc
         rm -f "$BUILD_DIR"/*.sym
         rm -f "$BUILD_DIR"/*.vs
+        rm -f "$BUILD_DIR"/*.d64
         echo -e "${GREEN}Clean complete.${NC}"
         exit 0
         ;;
 
-    process)
-        echo -e "${YELLOW}Step 1: Processing SID files...${NC}"
-        python3 "$TOOLS_DIR/sid_processor.py"
-        echo -e "${GREEN}SID processing complete.${NC}"
+    list)
+        echo ""
+        echo "  Available demos:"
+        echo ""
+        echo -e "    ${CYAN}quadcore${NC}    QuadCore by Vincenzo / Singular Crew"
+        echo "              4 separate single-SID tunes, relocated + patched"
+        echo -e "              Source: ${LGREY}sids/quadcore/${NC}"
+        echo ""
+        echo -e "    ${CYAN}megachase${NC}   Mega Chase Theme by SHAD0WFAX"
+        echo "              Native 4-SID composition (PSID v4E)"
+        echo -e "              Source: ${LGREY}sids/megachase/${NC}"
+        echo ""
         exit 0
         ;;
 
-    run|build)
-        # Continue with build
+    "")
+        echo ""
+        echo "  Usage: $0 <demo> [run]"
+        echo ""
+        echo "  Commands:"
+        echo -e "    ${CYAN}$0 quadcore${NC}        Build QuadCore demo"
+        echo -e "    ${CYAN}$0 megachase${NC}       Build Mega Chase demo"
+        echo -e "    ${CYAN}$0 all${NC}             Build all demos"
+        echo -e "    ${CYAN}$0 <demo> run${NC}      Build and launch in VICE"
+        echo -e "    ${CYAN}$0 clean${NC}           Remove build artifacts"
+        echo -e "    ${CYAN}$0 list${NC}            List available demos"
+        echo ""
+        exit 0
         ;;
 
     *)
-        echo "Usage: $0 [build|run|clean|process]"
+        echo ""
+        echo -e "${RED}Unknown demo: $DEMO${NC}"
+        echo "  Run '$0 list' to see available demos."
+        echo ""
         exit 1
         ;;
 esac
 
-# ---- Step 1: Process SID files ----
-echo -e "${YELLOW}Step 1: Processing SID files...${NC}"
-python3 "$TOOLS_DIR/sid_processor.py"
-echo ""
-
-# ---- Step 2: Compile with KickAssembler ----
-echo -e "${YELLOW}Step 2: Compiling with KickAssembler...${NC}"
-
-if [ ! -f "$KICKASS_JAR" ]; then
-    echo -e "${RED}ERROR: KickAssembler not found at: $KICKASS_JAR${NC}"
-    echo "Please ensure KickAss.jar is in the KickAssembler/ directory."
-    exit 1
-fi
-
-# Check for Java
-if ! command -v java &> /dev/null; then
-    echo -e "${RED}ERROR: Java is not installed.${NC}"
+# Show D64 contents if it exists
+if [ -f "$OUTPUT_D64" ] && [ -x "$C1541_CMD" ]; then
     echo ""
-    echo "KickAssembler requires Java. Install it with:"
-    echo "  brew install openjdk"
-    echo ""
-    echo "Or download from: https://adoptium.net/"
-    echo ""
-    echo -e "${YELLOW}NOTE: SID processing completed successfully.${NC}"
-    echo "Patched binaries are in: $BUILD_DIR/"
-    echo "Once Java is installed, run this script again to compile."
-    exit 1
-fi
-
-# Run KickAssembler
-# -odir: output directory
-# -showmem: show memory map
-# -symbolfile: generate symbol file for debugging
-java -jar "$KICKASS_JAR" \
-    "$MAIN_ASM" \
-    -odir "$BUILD_DIR" \
-    -o "$OUTPUT_PRG" \
-    -showmem \
-    -symbolfile
-
-if [ $? -eq 0 ]; then
-    echo ""
-    echo -e "${GREEN}Build successful!${NC}"
-    echo -e "  Output: ${CYAN}$OUTPUT_PRG${NC}"
-    FILE_SIZE=$(wc -c < "$OUTPUT_PRG" | tr -d ' ')
-    echo -e "  Size:   ${CYAN}$FILE_SIZE bytes${NC}"
-else
-    echo -e "${RED}Build FAILED!${NC}"
-    exit 1
-fi
-
-# ---- Step 3: Compress with Exomizer ----
-OUTPUT_EXO="$BUILD_DIR/QuadSID_Player_exo.prg"
-
-if command -v exomizer &> /dev/null; then
-    echo ""
-    echo -e "${YELLOW}Step 3: Compressing with Exomizer...${NC}"
-    exomizer sfx sys -t64 -n -o "$OUTPUT_EXO" "$OUTPUT_PRG"
-
-    if [ $? -eq 0 ]; then
-        EXO_SIZE=$(wc -c < "$OUTPUT_EXO" | tr -d ' ')
-        RATIO=$(( (FILE_SIZE - EXO_SIZE) * 100 / FILE_SIZE ))
-        echo ""
-        echo -e "${GREEN}Compression successful!${NC}"
-        echo -e "  Original:   ${CYAN}$FILE_SIZE bytes${NC}"
-        echo -e "  Compressed: ${CYAN}$EXO_SIZE bytes${NC}  (${RATIO}% reduction)"
-        echo -e "  Output:     ${CYAN}$OUTPUT_EXO${NC}"
-    else
-        echo -e "${RED}WARNING: Exomizer compression failed. Uncompressed PRG still available.${NC}"
-    fi
-else
-    echo ""
-    echo -e "${YELLOW}Step 3: Skipping compression (Exomizer not installed)${NC}"
-    echo "  Install with: brew install exomizer"
-fi
-
-# ---- Step 4: Create D64 disk image ----
-OUTPUT_D64="$BUILD_DIR/EVO64-SuperQuattro.d64"
-DISK_NAME="evo64 super quattro"
-DISK_ID="eq"
-D64_FILE_NAME="quad sid player"
-
-# Choose the best available PRG for the disk image
-if [ -f "$OUTPUT_EXO" ]; then
-    D64_SOURCE="$OUTPUT_EXO"
-    D64_LABEL="compressed"
-else
-    D64_SOURCE="$OUTPUT_PRG"
-    D64_LABEL="uncompressed"
-fi
-
-if [ -x "$C1541_CMD" ]; then
-    echo ""
-    echo -e "${YELLOW}Step 4: Creating D64 disk image...${NC}"
-    "$C1541_CMD" \
-        -format "$DISK_NAME,$DISK_ID" d64 "$OUTPUT_D64" \
-        -write "$D64_SOURCE" "$D64_FILE_NAME" 2>&1 | grep -v "OPENCBM\|libopencbm"
-
-    if [ $? -eq 0 ] || [ -f "$OUTPUT_D64" ]; then
-        D64_SIZE=$(wc -c < "$OUTPUT_D64" | tr -d ' ')
-        echo ""
-        echo -e "${GREEN}Disk image created!${NC}"
-        echo -e "  Output:   ${CYAN}$OUTPUT_D64${NC}"
-        echo -e "  Contains: ${CYAN}$D64_FILE_NAME${NC}  ($D64_LABEL)"
-    fi
-else
-    echo ""
-    echo -e "${YELLOW}Step 4: Skipping D64 creation (c1541 not found)${NC}"
-    echo "  c1541 is included with VICE. Set VICE_PATH to enable."
-fi
-
-# ---- Step 5: Launch in VICE (if requested) ----
-if [ "$1" = "run" ]; then
-    echo ""
-    echo -e "${YELLOW}Step 5: Launching VICE with Quad-SID configuration...${NC}"
-
-    if [ ! -x "$VICE_CMD" ]; then
-        echo -e "${RED}WARNING: VICE not found at: $VICE_CMD${NC}"
-        echo ""
-        echo "Set VICE_PATH to your x64sc installation:"
-        echo "  export VICE_PATH=\"/path/to/x64sc.app\""
-        echo ""
-        echo "Or use the standalone launcher:"
-        echo -e "  ${CYAN}./vice-quad-sid-play.sh${NC}"
-        exit 0
-    fi
-
-    echo "VICE command:"
-    echo "  $VICE_CMD $VICE_SID_OPTS $OUTPUT_PRG"
-    echo ""
-
-    $VICE_CMD $VICE_SID_OPTS "$OUTPUT_PRG" &
-    echo -e "${GREEN}VICE launched!${NC}"
+    echo -e "${GREEN}────────────────────────────────────────────${NC}"
+    echo -e "${GREEN}  D64 Disk Image Contents${NC}"
+    echo -e "${GREEN}────────────────────────────────────────────${NC}"
+    "$C1541_CMD" -attach "$OUTPUT_D64" -list 2>&1 | grep -v "OPENCBM\|libopencbm\|recognised\|attached\|detached"
 fi
 
 echo ""
@@ -232,16 +382,7 @@ echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}  Build Complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo ""
-echo "  Output files:"
-echo -e "    ${CYAN}$OUTPUT_PRG${NC}  (uncompressed)"
-if [ -f "$OUTPUT_EXO" ]; then
-echo -e "    ${CYAN}$OUTPUT_EXO${NC}  (Exomizer compressed)"
-fi
-if [ -f "$OUTPUT_D64" ]; then
-echo -e "    ${CYAN}$OUTPUT_D64${NC}  (D64 disk image)"
-fi
-echo ""
 echo "  To run in VICE:"
-echo -e "  ${CYAN}./vice-quad-sid-play.sh${NC}"
-echo -e "  ${CYAN}./build.sh run${NC}"
+echo -e "    ${CYAN}./build.sh <demo> run${NC}"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh <demo>${NC}"
 echo ""

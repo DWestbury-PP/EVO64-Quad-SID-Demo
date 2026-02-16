@@ -69,64 +69,86 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 ### Build Commands
 
 ```bash
-# Full build (process SIDs + compile assembly)
-./build.sh
+# Build a specific demo
+./build.sh quadcore
+./build.sh megachase
+
+# Build all demos
+./build.sh all
 
 # Build and launch in VICE emulator
-./build.sh run
-
-# Only process SID files (no compilation)
-./build.sh process
+./build.sh quadcore run
+./build.sh megachase run
 
 # Clean build artifacts
 ./build.sh clean
+
+# List available demos
+./build.sh list
 ```
 
 ### Output
 
-The build produces two files:
+Each demo produces an uncompressed PRG, an [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home)-compressed PRG (self-decrunching, ~60-77% smaller), and is added to a shared D64 disk image:
 
-- **`build/QuadSID_Player.prg`** (~31KB) — uncompressed, ready to load and run
-- **`build/QuadSID_Player_exo.prg`** (~7KB) — compressed with [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home), a self-decrunching executable that decompresses at load time
+```
+build/EVO64-SuperQuattro.d64     # D64 floppy image with all demos
+build/QuadSID_Player_exo.prg     # QuadCore (~7KB compressed from ~31KB)
+build/MegaChase_Player_exo.prg   # Mega Chase (~6KB compressed from ~13KB)
+```
 
-The compressed version reduces the file size by ~77%, significantly improving load times from floppy disk or SD2IEC. It runs identically to the uncompressed version — just `LOAD` and `RUN`. If Exomizer is not installed, the build skips compression and produces only the uncompressed PRG.
+The compressed versions load and run identically to the uncompressed versions — just `LOAD` and `RUN`. If Exomizer is not installed, the build skips compression automatically.
 
 ## Testing in VICE
 
-VICE 3.10 supports up to 8 SID chips. Launch with quad-SID configuration:
+VICE 3.10 supports up to 8 SID chips. Use the included launcher:
+
+```bash
+./vice-quad-sid-play.sh quadcore
+./vice-quad-sid-play.sh megachase
+```
+
+Or launch manually:
 
 ```bash
 x64sc -sidextra 3 \
   -sid2address 0xD420 \
   -sid3address 0xD440 \
   -sid4address 0xD460 \
-  build/QuadSID_Player.prg
-```
-
-Or use the included launcher script:
-
-```bash
-./vice-quad-sid-play.sh
+  build/QuadSID_Player_exo.prg
 ```
 
 ## Running on Real Hardware
 
-Load the `.prg` file onto the EVO64 Super Quattro via SD2IEC, Ultimate II+, or other storage device. The board must have four SID chips installed with the QAPLA PLA configured for the `$D400`/`$D420`/`$D440`/`$D460` addressing scheme.
+Copy the D64 disk image or individual `.prg` files onto the EVO64 Super Quattro via SD2IEC, Ultimate II+, or other storage device. The board must have four SID chips installed with the QAPLA PLA configured for the `$D400`/`$D420`/`$D440`/`$D460` addressing scheme.
+
+## Demos
+
+### QuadCore (Vincenzo / Singular Crew, 2017)
+
+Four separate single-SID tunes playing simultaneously via a raster interrupt chain. Each tune was originally composed for a single SID and is relocated + patched by `sid_processor.py` to target a different SID chip address.
+
+### Mega Chase Theme (SHAD0WFAX, 2025)
+
+A native 4-SID composition exported from SID-WIZARD 1.9 using the PSID v4E format. The single binary already contains code targeting all four SID chips with stereo channel mapping (SIDs 1+3 left, SIDs 2+4 right).
 
 ## Project Structure
 
 ```
 quad-sid-player/
 ├── src/
-│   └── QuadSID_Player.asm      # 6510 assembly: IRQ chain + title screen
+│   ├── QuadSID_Player.asm      # QuadCore: 4-way raster IRQ chain
+│   └── MegaChase_Player.asm    # Mega Chase: single-call 4-SID player
 ├── tools/
-│   └── sid_processor.py         # Python: SID parsing, disassembly, relocation
-├── QuadCore-SIDs/               # Source SID music files (4 tunes)
-├── build/                       # Generated artifacts (tune binaries, .prg)
-├── KickAssembler/               # KickAssembler cross-assembler (KickAss.jar)
+│   └── sid_processor.py         # SID parsing, disassembly, relocation
+├── sids/
+│   ├── quadcore/                # 4 separate single-SID tunes (.sid)
+│   └── megachase/               # Native 4-SID tune (.sid)
+├── build/                       # Generated artifacts (.prg, .d64)
+├── KickAssembler/               # KickAssembler cross-assembler
 ├── docs/                        # SID format specs, VICE documentation
 ├── assets/                      # Project images
-├── build.sh                     # Build orchestration script
+├── build.sh                     # Unified build script
 ├── vice-quad-sid-play.sh        # VICE launcher with quad-SID flags
 └── README.md
 ```

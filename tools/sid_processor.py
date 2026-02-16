@@ -877,28 +877,28 @@ def generate_kickasm_config(tune_configs, output_path):
 
 TUNE_CONFIG = [
     {
-        'sid_file': 'QuadCore-SIDs/Quad_Core_tune_1.sid',
+        'sid_file': 'sids/quadcore/Quad_Core_tune_1.sid',
         'label': 'Quad Core (tune 1)',
         'new_base': 0x1000,     # Keep at original location
         'sid_offset': 0x00,     # SID 1 at $D400 (no change)
         'output_bin': 'build/tune1.bin',
     },
     {
-        'sid_file': 'QuadCore-SIDs/Quad_Core_tune_2.sid',
+        'sid_file': 'sids/quadcore/Quad_Core_tune_2.sid',
         'label': 'Quad Core (tune 2)',
         'new_base': 0x3000,     # Relocate to $3000
         'sid_offset': 0x20,     # SID 2 at $D420
         'output_bin': 'build/tune2.bin',
     },
     {
-        'sid_file': 'QuadCore-SIDs/Quad_Core_tune_3.sid',
+        'sid_file': 'sids/quadcore/Quad_Core_tune_3.sid',
         'label': 'Quad Core (tune 3)',
         'new_base': 0x5000,     # Relocate to $5000
         'sid_offset': 0x40,     # SID 3 at $D440
         'output_bin': 'build/tune3.bin',
     },
     {
-        'sid_file': 'QuadCore-SIDs/Quad_Core_tune_4.sid',
+        'sid_file': 'sids/quadcore/Quad_Core_tune_4.sid',
         'label': 'Quad Core (tune 4)',
         'new_base': 0x7000,     # Relocate to $7000
         'sid_offset': 0x60,     # SID 4 at $D460

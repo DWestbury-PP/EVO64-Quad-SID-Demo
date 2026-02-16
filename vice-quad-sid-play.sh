@@ -3,11 +3,12 @@
 #  EVO64 Super Quattro - VICE Quad SID Launcher
 # ============================================================
 #
-#  Launches the Quad SID Player in VICE with 4 SID chips enabled.
+#  Launches 4-SID demos in VICE with all 4 SID chips enabled.
 #
 #  Usage:
-#    ./vice-quad-sid-play.sh           # Normal mode
-#    ./vice-quad-sid-play.sh --debug   # Enable remote monitor
+#    ./vice-quad-sid-play.sh quadcore        # Launch QuadCore demo
+#    ./vice-quad-sid-play.sh megachase       # Launch Mega Chase demo
+#    ./vice-quad-sid-play.sh <demo> --debug  # Enable remote monitor
 #
 #  Configuration:
 #    Set the VICE_PATH environment variable to your x64sc binary.
@@ -24,15 +25,6 @@
 #    Enables VICE's remote monitor on port 6510.
 #    Connect with:  telnet 127.0.0.1 6510
 #
-#    Useful monitor commands:
-#      m $dc00 $dc03          - Dump CIA1 port/DDR registers
-#      io $dc00               - CIA1 chip state
-#      watch store $dc02      - Break on CIA1 DDRA writes
-#      watch store $dc00      - Break on keyboard column select
-#      break $xxxx            - Breakpoint at address
-#      r                      - Show CPU registers
-#      x                      - Resume emulation
-#
 # ============================================================
 
 # Default VICE path (arm64 VICE 3.10 binary)
@@ -40,8 +32,63 @@ VICE_PATH="${VICE_PATH:-/Users/dwestbury/Documents/Tech_Stuff/Electronics/Commod
 
 # Project paths
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-PRG_EXO="$PROJECT_ROOT/build/QuadSID_Player_exo.prg"
-PRG_RAW="$PROJECT_ROOT/build/QuadSID_Player.prg"
+
+# Quad SID addressing configuration (same for all demos)
+SID_OPTS="-sidextra 3 -sid2address 0xD420 -sid3address 0xD440 -sid4address 0xD460"
+
+# Parse arguments
+DEMO=""
+DEBUG_OPTS=""
+DEBUG_MODE=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --debug)
+            DEBUG_MODE=true
+            DEBUG_OPTS="-remotemonitor -remotemonitoraddress ip4://127.0.0.1:6510 -keepmonopen"
+            ;;
+        quadcore|quad)
+            DEMO="quadcore"
+            ;;
+        megachase|mega)
+            DEMO="megachase"
+            ;;
+        *)
+            echo "Unknown argument: $arg"
+            echo ""
+            echo "Usage: $0 [quadcore|megachase] [--debug]"
+            exit 1
+            ;;
+    esac
+done
+
+# Show usage if no demo specified
+if [ -z "$DEMO" ]; then
+    echo ""
+    echo "  Usage: $0 <demo> [--debug]"
+    echo ""
+    echo "  Available demos:"
+    echo "    quadcore    QuadCore (Vincenzo / Singular Crew)"
+    echo "    megachase   Mega Chase Theme (SHAD0WFAX)"
+    echo ""
+    exit 0
+fi
+
+# Select the PRG file based on demo choice
+case "$DEMO" in
+    quadcore)
+        DEMO_NAME="QuadCore - Vincenzo / Singular Crew"
+        PRG_EXO="$PROJECT_ROOT/build/QuadSID_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/QuadSID_Player.prg"
+        BUILD_CMD="./build.sh"
+        ;;
+    megachase)
+        DEMO_NAME="Mega Chase Theme - SHAD0WFAX"
+        PRG_EXO="$PROJECT_ROOT/build/MegaChase_Player_exo.prg"
+        PRG_RAW="$PROJECT_ROOT/build/MegaChase_Player.prg"
+        BUILD_CMD="./build-megachase.sh"
+        ;;
+esac
 
 # Prefer compressed version if available
 if [ -f "$PRG_EXO" ]; then
@@ -49,19 +96,6 @@ if [ -f "$PRG_EXO" ]; then
 else
     PRG_FILE="$PRG_RAW"
 fi
-
-# Quad SID addressing configuration
-SID_OPTS="-sidextra 3 -sid2address 0xD420 -sid3address 0xD440 -sid4address 0xD460"
-
-# Check for --debug flag
-DEBUG_OPTS=""
-DEBUG_MODE=false
-for arg in "$@"; do
-    if [ "$arg" == "--debug" ]; then
-        DEBUG_MODE=true
-        DEBUG_OPTS="-remotemonitor -remotemonitoraddress ip4://127.0.0.1:6510 -keepmonopen"
-    fi
-done
 
 # Colors
 RED='\033[0;31m'
@@ -75,17 +109,18 @@ echo -e "${CYAN}============================================${NC}"
 echo -e "${CYAN}  EVO64 Super Quattro - Quad SID Launcher${NC}"
 echo -e "${CYAN}============================================${NC}"
 echo ""
+echo -e "  Demo: ${YELLOW}$DEMO_NAME${NC}"
+echo ""
 
 # Check that the PRG exists
 if [ ! -f "$PRG_FILE" ]; then
-    echo -e "${RED}ERROR: Build output not found: $PRG_FILE${NC}"
-    echo "Run ./build.sh first to compile the project."
+    echo -e "${RED}ERROR: Build output not found.${NC}"
+    echo "  Run $BUILD_CMD first to compile the project."
     exit 1
 fi
 
 # Resolve the actual x64sc binary
 if [[ "$VICE_PATH" == *.app ]]; then
-    # Try both common .app bundle layouts
     VICE_BIN="$VICE_PATH/Contents/Resources/bin/x64sc"
     if [ ! -x "$VICE_BIN" ]; then
         VICE_BIN="$VICE_PATH/Contents/MacOS/x64sc"
@@ -128,13 +163,6 @@ if $DEBUG_MODE; then
     echo -e "  ${YELLOW}DEBUG MODE ENABLED${NC}"
     echo -e "    Remote monitor: ${CYAN}telnet 127.0.0.1 6510${NC}"
     echo ""
-    echo -e "  Quick-start debug commands:"
-    echo -e "    ${LGREY}m \$dc00 \$dc03${NC}       - CIA1 ports & DDRs"
-    echo -e "    ${LGREY}watch store \$dc02${NC}  - Catch DDRA corruption"
-    echo -e "    ${LGREY}watch store \$dc00${NC}  - Watch column select writes"
-    echo -e "    ${LGREY}watch load \$dc01${NC}   - Watch keyboard row reads"
-    echo -e "    ${LGREY}x${NC}                   - Resume emulation"
-    echo ""
 fi
 
 echo -e "${YELLOW}Launching VICE...${NC}"
@@ -143,4 +171,8 @@ echo ""
 "$VICE_BIN" $SID_OPTS $DEBUG_OPTS "$PRG_FILE" &
 
 echo -e "${GREEN}VICE launched! (PID: $!)${NC}"
+echo ""
+echo "  Available demos:"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh quadcore${NC}    QuadCore (4 separate SIDs)"
+echo -e "    ${CYAN}./vice-quad-sid-play.sh megachase${NC}   Mega Chase (native 4-SID)"
 echo ""
