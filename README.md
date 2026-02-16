@@ -57,6 +57,8 @@ The patching strategy was informed by studying the **SID-WIZARD 1.94 native sour
 
 The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and configures a circular VIC-II raster interrupt chain. With BASIC and KERNAL ROMs banked out (`$01 = $35`), the hardware IRQ vector at `$FFFE/$FFFF` is written directly. Each IRQ handler plays one tune, sets the next raster trigger line and handler address, then returns — creating a stable four-way round-robin at 50Hz per tune.
 
+For a detailed guide on analyzing and integrating different types of 4-SID files (PSID, RSID, single-SID collections, native multi-SID), see **[Integrating 4-SID Tunes](docs/Integrating-4SID-tunes.txt)**.
+
 ## Building
 
 ### Prerequisites
@@ -70,19 +72,22 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 
 ```bash
 # Build a specific demo
-./build.sh quadcore
-./build.sh megachase
-./build.sh hermit
-./build.sh teenspirit
+./build.sh quadcore       # QuadCore (Vincenzo)
+./build.sh megachase      # Mega Chase (SHAD0WFAX)
+./build.sh hermit         # 4SID Example (HERMIT)
+./build.sh siggraph       # Siggraph Invitro (Narciso)
+./build.sh teenspirit     # Teen Spirit (John Ames)
+./build.sh hammer         # A-D Hammer (Rayden)
+./build.sh mon            # A-D Mon (Rayden)
+./build.sh twice          # A-D Twice (Rayden)
 
 # Build all demos
 ./build.sh all
 
 # Build and launch in VICE emulator
 ./build.sh quadcore run
-./build.sh megachase run
-./build.sh hermit run
-./build.sh teenspirit run
+./build.sh hammer run
+# ... etc.
 
 # Clean build artifacts
 ./build.sh clean
@@ -96,11 +101,15 @@ The 6510 assembly harness (`QuadSID_Player.asm`) initializes all four tunes and 
 Each demo produces an uncompressed PRG, an [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home)-compressed PRG (self-decrunching, ~60-77% smaller), and is added to a shared D64 disk image:
 
 ```
-build/EVO64-SuperQuattro.d64       # D64 floppy image with all demos
-build/QuadSID_Player_exo.prg       # QuadCore (~7KB compressed from ~31KB)
-build/MegaChase_Player_exo.prg     # Mega Chase (~6KB compressed from ~13KB)
-build/Hermit4SID_Player_exo.prg    # 4SID Example (~5KB compressed from ~11KB)
-build/TeenSpirit_Player_exo.prg    # Teen Spirit (~4KB compressed from ~29KB)
+build/EVO64-SuperQuattro.d64           # D64 floppy image with all demos
+build/QuadSID_Player_exo.prg           # QuadCore        (~7KB from ~31KB)
+build/MegaChase_Player_exo.prg         # Mega Chase       (~6KB from ~13KB)
+build/Hermit4SID_Player_exo.prg        # 4SID Example     (~5KB from ~11KB)
+build/SiggraphInvitro_Player_exo.prg   # Siggraph Invitro (~3KB from  ~7KB)
+build/TeenSpirit_Player_exo.prg        # Teen Spirit       (~4KB from ~29KB)
+build/Rayden_Hammer_Player_exo.prg     # A-D Hammer        (~7KB from ~18KB)
+build/Rayden_Mon_Player_exo.prg        # A-D Mon           (~7KB from ~14KB)
+build/Rayden_Twice_Player_exo.prg      # A-D Twice         (~7KB from ~17KB)
 ```
 
 The compressed versions load and run identically to the uncompressed versions — just `LOAD` and `RUN`. If Exomizer is not installed, the build skips compression automatically.
@@ -113,7 +122,11 @@ VICE 3.10 supports up to 8 SID chips. Use the included launcher:
 ./vice-quad-sid-play.sh quadcore
 ./vice-quad-sid-play.sh megachase
 ./vice-quad-sid-play.sh hermit
+./vice-quad-sid-play.sh siggraph
 ./vice-quad-sid-play.sh teenspirit
+./vice-quad-sid-play.sh hammer
+./vice-quad-sid-play.sh mon
+./vice-quad-sid-play.sh twice
 ```
 
 Or launch manually:
@@ -144,32 +157,52 @@ A native 4-SID composition exported from SID-WIZARD 1.9 using the PSID v4E forma
 
 A native 4-SID composition by Mihály Horváth (HERMIT), the creator of SID-WIZARD. Also uses the PSID v4E format with stereo channel mapping. A showcase of the SID-WIZARD 1.9 multi-SID capabilities.
 
+### Siggraph Invitro 4SID (Narciso / Onslaught, 2023)
+
+A native 4-SID composition exported from SID-WIZARD 1.9 using the PSID v4E format. Like Mega Chase and HERMIT, a single play call drives all four SID chips. The tune binary spans into the BASIC ROM shadow at `$A000`, requiring early ROM banking before init — a gotcha [documented in our integration guide](docs/Integrating-4SID-tunes.txt).
+
 ### Smells Like Teen Spirit (John Ames / AmesSoft, 2003)
 
 A four-part cover of Nirvana's classic arranged across four separate SID files — main guitar, 2nd guitar, bass & drums, and melody. Like QuadCore, the four tunes are relocated and patched by `sid_processor.py` to target different memory addresses and SID chips. Originally composed for MOS 6581 at NTSC timing.
+
+### A-D Hammer / Mon / Twice (Rayden / Alpha Flight, 1998)
+
+Three native 4-SID compositions by Patrick Zeh (Rayden), packaged as RSID v4E files. Unlike the PSID tunes above, these contain **four independent player instances** inside a single binary, each pre-configured for its own SID chip (`$D400`, `$D420`, `$D440`, `$D460`). The original RSID wrapper uses a busy-wait loop; our harness bypasses it and calls each sub-tune's init/play directly from a raster IRQ. No relocation or SID patching is needed. See [Integrating 4-SID Tunes](docs/Integrating-4SID-tunes.txt) for details on the different integration categories.
 
 ## Project Structure
 
 ```
 quad-sid-player/
 ├── src/
-│   ├── QuadSID_Player.asm      # QuadCore: 4-way raster IRQ chain
-│   ├── MegaChase_Player.asm    # Mega Chase: single-call 4-SID player
-│   ├── Hermit4SID_Player.asm   # 4SID Example: single-call 4-SID player
-│   └── TeenSpirit_Player.asm   # Teen Spirit: 4-way raster IRQ chain
+│   ├── QuadSID_Player.asm          # QuadCore: 4-way raster IRQ chain
+│   ├── MegaChase_Player.asm        # Mega Chase: single-call native 4-SID
+│   ├── Hermit4SID_Player.asm       # 4SID Example: single-call native 4-SID
+│   ├── SiggraphInvitro_Player.asm  # Siggraph Invitro: single-call native 4-SID
+│   ├── TeenSpirit_Player.asm       # Teen Spirit: 4-way raster IRQ chain
+│   ├── Rayden_Hammer_Player.asm    # A-D Hammer: 4 sub-tune RSID harness
+│   ├── Rayden_Mon_Player.asm       # A-D Mon: 4 sub-tune RSID harness
+│   └── Rayden_Twice_Player.asm     # A-D Twice: 4 sub-tune RSID harness
 ├── tools/
-│   └── sid_processor.py         # SID parsing, disassembly, relocation
+│   ├── sid_processor.py             # SID parsing, disassembly, relocation
+│   └── multisid-tester.prg          # SID address tester utility (C64)
 ├── sids/
-│   ├── quadcore/                # 4 separate single-SID tunes (.sid)
-│   ├── megachase/               # Native 4-SID tune (.sid)
-│   ├── hermit-4sid-example/     # Native 4-SID tune (.sid)
-│   └── smells-like-team-spirit/ # 4 separate single-SID tunes (.sid)
-├── build/                       # Generated artifacts (.prg, .d64)
-├── KickAssembler/               # KickAssembler cross-assembler
-├── docs/                        # SID format specs, VICE documentation
-├── assets/                      # Project images
-├── build.sh                     # Unified build script
-├── vice-quad-sid-play.sh        # VICE launcher with quad-SID flags
+│   ├── quadcore/                    # 4 separate single-SID tunes (.sid)
+│   ├── megachase/                   # Native 4-SID PSID v4E (.sid)
+│   ├── hermit-4sid-example/         # Native 4-SID PSID v4E (.sid)
+│   ├── siggraph-invitro/            # Native 4-SID PSID v4E (.sid)
+│   ├── smells-like-team-spirit/     # 4 separate single-SID tunes (.sid)
+│   ├── rayden-hammer/               # Native 4-SID RSID v4E (.sid)
+│   ├── rayden-mon/                  # Native 4-SID RSID v4E (.sid)
+│   └── rayden-twice/                # Native 4-SID RSID v4E (.sid)
+├── build/                           # Generated artifacts (.prg, .d64)
+├── KickAssembler/                   # KickAssembler cross-assembler
+├── docs/
+│   ├── Integrating-4SID-tunes.txt   # Integration guide & category reference
+│   ├── SID-file-format.txt          # HVSC SID format specification
+│   └── Exotic-SID-formats.txt       # PSID v4E extended header format
+├── assets/                          # Project images
+├── build.sh                         # Unified build script
+├── vice-quad-sid-play.sh            # VICE launcher with quad-SID flags
 └── README.md
 ```
 
@@ -234,8 +267,8 @@ The EVO64 is a hardware reimagining of the Commodore 64 that brings together dec
 ## Credits
 
 - **Hardware**: EVO64 Super Quattro by Auroscience
-- **Music**: László Vincze (Vincenzo) / Singular Crew, 2017; SHAD0WFAX, 2025; HERMIT (Mihály Horváth), 2022; John Ames / AmesSoft, 2003
-- **Player Engines**: SID-WIZARD 1.7 / 1.9
+- **Music**: László Vincze (Vincenzo) / Singular Crew, 2017; SHAD0WFAX, 2025; HERMIT (Mihály Horváth), 2022; Narciso / Onslaught, 2023; John Ames / AmesSoft, 2003; Patrick Zeh (Rayden) / Alpha Flight, 1998
+- **Player Engines**: SID-WIZARD 1.7 / 1.9; DMC 4SID
 - **Compression**: [Exomizer](https://bitbucket.org/magli143/exomizer/wiki/Home) by Magnus Lind
 - **Quad SID Player & Tooling**: EVO64 Project, 2026
 
