@@ -4,7 +4,7 @@
 
 This project creates a simultaneous quad-SID music player for the [EVO64 Super Quattro](https://evo64.com) — a modern hardware reimagining of the Commodore 64 that supports up to four SID audio chips, delivering 12 voices of polyphonic chiptune goodness.
 
-![EVO64 Super Quattro](assets/EVO64-SuperQuattro-4SID.jpeg)
+![EVO64 Super Quattro](assets/EVO64-SuperQuattro-4SID-2026-02-16.jpg)
 *The EVO64 Super Quattro board with four SID chip sockets, dual CIAs, onboard audio amps, and the custom QAPLA PLA — ready for 12-voice polyphonic playback.*
 
 ## Overview
@@ -21,6 +21,7 @@ Four independent SID tunes play simultaneously, each driving a separate SID chip
 Playback is driven by a raster interrupt chain that divides the PAL video frame (312 raster lines) into four equal segments, triggering each tune's play routine in sequence every ~78 lines.
 
 ## Music
+![QuadCore-Player](assets/quad-core-player.jpg)
 
 All four tunes are by **László Vincze (Vincenzo)** of **Singular Crew** (2017), created with **SID-WIZARD 1.7**. The tunes are configured for the **MOS 8580** SID chip at **PAL** timing (50Hz VBI).
 
@@ -28,7 +29,7 @@ All four tunes are by **László Vincze (Vincenzo)** of **Singular Crew** (2017)
 
 ### The Challenge
 
-No one had ever made a single playable 4-SID track before. The C64 normally has one SID chip at address `$D400`. The EVO64 Super Quattro maps four SIDs at `$D400`, `$D420`, `$D440`, and `$D460`.
+I couldn't find a single playable 4-SID track demo, so I combined four different single-SID players, by relocating thier player code and their music data. 
 
 Standard SID tunes are compiled with hardcoded absolute addresses baked throughout their code and data — both references to their own load address (`$1000`) and to the SID register base (`$D400`). All four of our source tunes are compiled identically at `$1000` targeting `$D400`. To play them simultaneously, each must be relocated to its own memory region and retargeted to a different SID chip, without corrupting the music.
 
